@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import { AppSettings, RoutingMode, RoutingAggressiveness } from './types'
 
 const DEFAULT_SETTINGS: AppSettings = {
-  claudeApiKey: '',
   ollamaModel: 'qwen3:14b',          // PRD v2: Qwen 3 14B replaces llama3.1 as primary
   dailyBudgetLimit: 3.0,             // PRD v2: $15-20/month target → ~$3/day
   monthlyBudgetLimit: 15.0,          // PRD v2: updated from $5 to $15
@@ -18,8 +17,10 @@ const DEFAULT_SETTINGS: AppSettings = {
 interface SettingsStore {
   settings: AppSettings
   settingsPanelOpen: boolean
+  hasApiKey: boolean
+  checkApiKey: () => Promise<void>
+  setApiKey: (key: string) => Promise<boolean>   // write-only — never stored in renderer state
   updateSettings: (updates: Partial<AppSettings>) => void
-  setApiKey: (key: string) => void
   setOllamaModel: (model: string) => void
   setRoutingMode: (mode: RoutingMode) => void
   setRoutingAggressiveness: (a: RoutingAggressiveness) => void
@@ -42,31 +43,42 @@ function persistSettings(settings: AppSettings): void {
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
   settings: { ...DEFAULT_SETTINGS },
   settingsPanelOpen: false,
+  hasApiKey: false,
 
   loadFromDb: async () => {
     try {
       const result = await window.electron.db.settings.get(DB_KEY)
       if (result.success && result.value) {
         const saved = JSON.parse(result.value) as Partial<AppSettings>
-        // Merge with defaults so new keys added later have values
-        set({ settings: { ...DEFAULT_SETTINGS, ...saved } })
+        // Strip any legacy claudeApiKey that may have been stored in the blob
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { claudeApiKey: _, ...rest } = saved as any
+        set({ settings: { ...DEFAULT_SETTINGS, ...rest } })
       }
+      // Check key existence in main process
+      const keyResult = await window.electron.apiKeyHas?.()
+      set({ hasApiKey: keyResult?.hasKey ?? false })
     } catch (e) {
       console.error('[SettingsStore] DB load failed:', e)
     }
   },
 
+  checkApiKey: async () => {
+    const result = await window.electron.apiKeyHas?.()
+    set({ hasApiKey: result?.hasKey ?? false })
+  },
+
+  // Sends key to main process for secure storage — raw key never stored in renderer
+  setApiKey: async (key: string) => {
+    const result = await window.electron.apiKeySet?.(key)
+    const success = result?.success ?? false
+    if (success) set({ hasApiKey: key.trim().length > 0 })
+    return success
+  },
+
   updateSettings: (updates) => {
     set((s) => {
       const settings = { ...s.settings, ...updates }
-      persistSettings(settings)
-      return { settings }
-    })
-  },
-
-  setApiKey: (claudeApiKey) => {
-    set((s) => {
-      const settings = { ...s.settings, claudeApiKey }
       persistSettings(settings)
       return { settings }
     })

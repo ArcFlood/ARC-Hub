@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('electron', {
   // Claude (runs in main process — no CORS)
   claudeStreamStart: (params: object) => ipcRenderer.invoke('claude-stream-start', params),
 
+  // API key — write-only from renderer. Raw key stored in main process only.
+  apiKeySet: (key: string) => ipcRenderer.invoke('apiKey:set', key),
+  apiKeyHas: () => ipcRenderer.invoke('apiKey:has'),
+
   // Shared stream abort
   streamAbort: (streamId: string) => ipcRenderer.invoke('stream-abort', streamId),
 

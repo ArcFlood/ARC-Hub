@@ -8,7 +8,6 @@ export interface ClaudeUsage {
 }
 
 export async function streamClaudeChat(
-  apiKey: string,
   model: string,
   systemPrompt: string,
   messages: Array<{ role: string; content: string }>,
@@ -52,6 +51,7 @@ export async function streamClaudeChat(
       resolve()
     })
 
-    window.electron.claudeStreamStart({ streamId, apiKey, model, systemPrompt, messages })
+    // Note: apiKey is intentionally omitted — main process reads it directly from DB
+    window.electron.claudeStreamStart({ streamId, model, systemPrompt, messages })
   })
 }

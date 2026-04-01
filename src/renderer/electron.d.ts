@@ -15,9 +15,13 @@ declare global {
       }) => Promise<void>
 
       claudeStreamStart: (params: {
-        streamId: string; apiKey: string; model: string
+        streamId: string; model: string
         systemPrompt: string; messages: Array<{ role: string; content: string }>
       }) => Promise<void>
+
+      // API key — write-only from renderer; main reads from DB when calling Claude
+      apiKeySet: (key: string) => Promise<{ success: boolean; error?: string }>
+      apiKeyHas: () => Promise<{ hasKey: boolean }>
 
       streamAbort: (streamId: string) => Promise<void>
       onStreamEvent: (streamId: string, callback: (data: unknown) => void) => () => void

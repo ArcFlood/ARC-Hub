@@ -14,7 +14,6 @@ export interface SendOptions {
   tier: ModelTier
   conversationHistory: ChatMessage[]
   settings: {
-    claudeApiKey: string
     ollamaModel: string
     extendedThinking: boolean
   }
@@ -57,11 +56,9 @@ export async function sendMessage(opts: SendOptions): Promise<void> {
     return
   }
 
-  // ── Cloud: Haiku or A.R.C. Sonnet ────────────────────────────
-  if (!settings.claudeApiKey) {
-    onError(new Error('Claude API key not set. Go to Settings → API Keys to add it.'))
-    return
-  }
+  // ── Cloud: Haiku, A.R.C. Sonnet, or A.R.C. Opus ─────────────
+  // Note: API key check is deferred to main process — it will emit an error event
+  // if the key is missing, which onError handles via the stream event listener.
 
   // Use plugin systemPrompt if provided, otherwise load A.R.C. prompt
   let systemPrompt: string
@@ -84,7 +81,6 @@ export async function sendMessage(opts: SendOptions): Promise<void> {
   let exactOutputTokens: number | null = null
 
   await streamClaudeChat(
-    settings.claudeApiKey,
     model,
     systemPrompt,
     chatHistory,

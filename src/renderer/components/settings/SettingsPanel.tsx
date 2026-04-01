@@ -13,6 +13,7 @@ type Tab = 'api' | 'budget' | 'routing' | 'models' | 'analytics' | 'about'
 export default function SettingsPanel() {
   const { settings, updateSettings, closeSettingsPanel, resetToDefaults } = useSettingsStore()
   const availableModels = useServiceStore((s) => s.availableOllamaModels)
+  // claudeApiKey is intentionally excluded — managed separately via ApiKeyInput (write-only IPC)
   const [local, setLocal] = useState({ ...settings })
   const [activeTab, setActiveTab] = useState<Tab>('api')
 
@@ -62,23 +63,18 @@ export default function SettingsPanel() {
             {/* API Keys */}
             {activeTab === 'api' && (
               <>
-                <ApiKeyInput label="Claude API Key" value={local.claudeApiKey}
-                  onChange={(v) => setLocal((s) => ({ ...s, claudeApiKey: v }))}
-                  placeholder="sk-ant-api03-..." />
+                <ApiKeyInput />
 
-                {!local.claudeApiKey && (
-                  <div className="bg-warning/10 border border-warning/30 rounded-lg px-4 py-3 text-xs text-warning space-y-1">
-                    <p className="font-semibold">No API key set</p>
-                    <p>Claude (Haiku + A.R.C.) tiers won't work. Only local Ollama will respond.</p>
-                    <a
-                      href="#"
-                      onClick={(e) => { e.preventDefault(); window.electron.openExternal('https://console.anthropic.com/settings/keys') }}
-                      className="underline hover:opacity-80"
-                    >
-                      Get your key at console.anthropic.com →
-                    </a>
-                  </div>
-                )}
+                <div className="bg-surface-elevated border border-border rounded-lg px-4 py-3 text-xs text-text-muted space-y-1">
+                  <p>Claude (Haiku, Sonnet, Opus) tiers require an API key.</p>
+                  <a
+                    href="#"
+                    onClick={(e) => { e.preventDefault(); window.electron.openExternal('https://console.anthropic.com/settings/keys') }}
+                    className="underline hover:opacity-80 text-accent"
+                  >
+                    Get your key at console.anthropic.com →
+                  </a>
+                </div>
 
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-text-muted uppercase tracking-wider">Ollama Model</label>

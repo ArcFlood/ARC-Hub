@@ -155,6 +155,34 @@ export function listPlugins(): PluginManifest[] {
   return plugins.sort((a, b) => a.name.localeCompare(b.name))
 }
 
+// Max allowed system prompt length (prevents exfiltration via enormous prompts)
+const MAX_SYSTEM_PROMPT_LENGTH = 8_000
+
+// Characters/patterns that suggest prompt injection attempts
+const INJECTION_PATTERNS = [
+  /ignore\s+(previous|all|prior)\s+instructions?/i,
+  /you\s+are\s+now\s+(?:a\s+)?(?:an?\s+)?(?:evil|malicious|unrestricted)/i,
+  /forget\s+(?:your|all)\s+(?:previous\s+)?(?:instructions?|training|rules)/i,
+  /disregard\s+(?:your|all)\s+(?:previous\s+)?instructions?/i,
+  /\bexfiltrate\b/i,
+  /send\s+(?:all|this|the)\s+(?:data|content|conversation)\s+to/i,
+]
+
+function validateSystemPrompt(prompt: string): { valid: boolean; reason?: string } {
+  if (!prompt || prompt.trim().length === 0) {
+    return { valid: false, reason: 'systemPrompt is empty' }
+  }
+  if (prompt.length > MAX_SYSTEM_PROMPT_LENGTH) {
+    return { valid: false, reason: `systemPrompt exceeds ${MAX_SYSTEM_PROMPT_LENGTH} character limit` }
+  }
+  for (const pattern of INJECTION_PATTERNS) {
+    if (pattern.test(prompt)) {
+      return { valid: false, reason: `systemPrompt contains suspicious pattern: ${pattern.source}` }
+    }
+  }
+  return { valid: true }
+}
+
 export function installPlugin(srcPath: string): { success: boolean; error?: string } {
   try {
     ensurePluginsDir()
@@ -162,6 +190,15 @@ export function installPlugin(srcPath: string): { success: boolean; error?: stri
     const parsed = JSON.parse(raw) as PluginManifest
     if (!parsed.id || !parsed.name || !parsed.systemPrompt) {
       return { success: false, error: 'Invalid plugin manifest: missing id, name, or systemPrompt' }
+    }
+    // Sanitize id — only allow alphanumeric, hyphens, underscores
+    if (!/^[a-z0-9_-]{1,64}$/.test(parsed.id)) {
+      return { success: false, error: 'Plugin id must be 1-64 characters: letters, numbers, hyphens, underscores only' }
+    }
+    // Validate systemPrompt for injection patterns and length
+    const check = validateSystemPrompt(parsed.systemPrompt)
+    if (!check.valid) {
+      return { success: false, error: `Invalid plugin: ${check.reason}` }
     }
     const dest = path.join(PLUGINS_DIR, `${parsed.id}.json`)
     fs.copyFileSync(srcPath, dest)

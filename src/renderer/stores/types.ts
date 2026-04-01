@@ -98,7 +98,8 @@ export type RoutingMode = 'auto' | 'ollama' | 'haiku' | 'arc-sonnet' | 'arc-opus
 export type RoutingAggressiveness = 'cost-first' | 'balanced' | 'quality-first'
 
 export interface AppSettings {
-  claudeApiKey: string
+  // Note: Claude API key is NOT stored here — it lives in main process only.
+  // Use window.electron.apiKeySet / apiKeyHas from the renderer.
   ollamaModel: string
   dailyBudgetLimit: number
   monthlyBudgetLimit: number

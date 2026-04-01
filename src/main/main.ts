@@ -72,10 +72,13 @@ function createWindow(): BrowserWindow {
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
+      contextIsolation: true,   // Renderer JS cannot access Node APIs directly — preload bridge only
+      // sandbox: false is required by better-sqlite3 (native .node module needs fs access in preload).
+      // Mitigated by contextIsolation: true — renderer has no access to Node globals.
       sandbox: false,
       nodeIntegration: false,
-      // Allow loading from localhost in dev without CORB blocking
+      // webSecurity: false in dev only — allows loading localhost:5173 without CORS issues.
+      // In production (isPackaged) web security is always enabled.
       webSecurity: !isDev,
     },
   })
@@ -396,12 +399,13 @@ ipcMain.handle('ollama-stream-start', async (event, params: {
 // ── IPC: Claude streaming (main process = no CORS) ────────────────
 ipcMain.handle('claude-stream-start', async (event, params: {
   streamId: string
-  apiKey: string
   model: string
   systemPrompt: string
   messages: Array<{ role: string; content: string }>
 }) => {
-  const { streamId, apiKey, model, systemPrompt, messages } = params
+  // API key is read here in main — it never transits back to the renderer
+  const apiKey = getApiKeyFromDb()
+  const { streamId, model, systemPrompt, messages } = params
   const controller = new AbortController()
   activeStreams.set(streamId, controller)
 
@@ -409,6 +413,12 @@ ipcMain.handle('claude-stream-start', async (event, params: {
     if (!event.sender.isDestroyed()) {
       event.sender.send(`stream-${streamId}`, data)
     }
+  }
+
+  if (!apiKey) {
+    emit({ type: 'error', error: 'Claude API key not set. Go to Settings → API Keys to add it.' })
+    activeStreams.delete(streamId)
+    return
   }
 
   try {
@@ -844,6 +854,30 @@ ipcMain.handle('plugins:open-dir', () => {
   return { success: true }
 })
 
+// ── IPC: API Key (main-process-only storage) ──────────────────────
+// The raw API key NEVER flows from main → renderer.
+// Renderer can write via apiKey:set and check existence via apiKey:has.
+// claude-stream-start reads it directly from the DB inside main.
+
+const CLAUDE_API_KEY_DB = 'claude-api-key'
+
+function getApiKeyFromDb(): string {
+  try { return getSetting(CLAUDE_API_KEY_DB) ?? '' }
+  catch { return '' }
+}
+
+ipcMain.handle('apiKey:set', (_event, key: string) => {
+  try {
+    const trimmed = (key ?? '').trim()
+    setSetting(CLAUDE_API_KEY_DB, trimmed)
+    return { success: true }
+  } catch (e) { return { success: false, error: String(e) } }
+})
+
+ipcMain.handle('apiKey:has', () => {
+  return { hasKey: getApiKeyFromDb().length > 0 }
+})
+
 // ── IPC: Error / Debug Log ────────────────────────────────────────
 
 // Renderer can push its own log entries (JS errors, unhandled rejections)
@@ -898,9 +932,9 @@ ipcMain.handle('session:read', (_event, filePath: string) => {
 
 ipcMain.handle('session:write-summary', async (_event, params: {
   data: SessionSummaryData
-  apiKey?: string
 }) => {
-  const { data, apiKey } = params
+  const { data } = params
+  const apiKey = getApiKeyFromDb()
   let topics = ''
 
   // Attempt to call Haiku to extract topics if API key available
