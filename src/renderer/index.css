@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  html, body, #root { height: 100%; margin: 0; padding: 0; }
+  body {
+    background-color: #1a1a1a;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    user-select: none;
+  }
+  /* Allow text selection in chat messages */
+  .selectable { user-select: text; }
+  /* Custom scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #404040; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #555; }
+  /* Draggable titlebar region */
+  .titlebar-drag { -webkit-app-region: drag; }
+  .titlebar-no-drag { -webkit-app-region: no-drag; }
+}
+
+@layer components {
+  .btn {
+    @apply px-3 py-1.5 rounded-md text-sm font-medium transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-accent hover:bg-accent-hover text-white;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent hover:bg-surface-elevated text-text-muted hover:text-text;
+  }
+  .btn-danger {
+    @apply btn bg-transparent hover:bg-danger/20 text-danger;
+  }
+  .input-base {
+    @apply bg-surface border border-border rounded-md px-3 py-2 text-text text-sm
+           placeholder:text-text-muted focus:outline-none focus:border-accent
+           transition-colors duration-150;
+  }
+  .card {
+    @apply bg-surface rounded-lg border border-border p-4;
+  }
+}

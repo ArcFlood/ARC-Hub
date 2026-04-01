@@ -1,0 +1,163 @@
+export {}
+
+declare global {
+  interface Window {
+    electron: {
+      platform: string
+      getPlatform: () => Promise<string>
+
+      loadArcPrompts: () => Promise<{ success: boolean; content?: string; source?: string; error?: string }>
+
+      ollamaListModels: () => Promise<{ success: boolean; models: string[] }>
+      ollamaStreamStart: (params: {
+        streamId: string; model: string
+        messages: Array<{ role: string; content: string }>
+      }) => Promise<void>
+
+      claudeStreamStart: (params: {
+        streamId: string; apiKey: string; model: string
+        systemPrompt: string; messages: Array<{ role: string; content: string }>
+      }) => Promise<void>
+
+      streamAbort: (streamId: string) => Promise<void>
+      onStreamEvent: (streamId: string, callback: (data: unknown) => void) => () => void
+
+      serviceStatus: (name: string) => Promise<{ running: boolean; pid?: number }>
+      serviceStart: (name: string) => Promise<{ success: boolean; error?: string }>
+      serviceStop: (name: string) => Promise<{ success: boolean; error?: string }>
+      openExternal: (url: string) => Promise<void>
+
+      fabricListPatterns: () => Promise<{ success: boolean; patterns: string[] }>
+      fabricRunPattern: (params: {
+        streamId: string
+        pattern: string
+        input: string
+      }) => Promise<void>
+
+      saveConversationMd: (params: {
+        title: string
+        content: string
+      }) => Promise<{ success: boolean; filePath?: string; error?: string }>
+
+      ollamaPullModel: (params: { streamId: string; modelName: string }) => Promise<void>
+      ollamaDeleteModel: (modelName: string) => Promise<{ success: boolean; error?: string }>
+
+      onMenuEvent: (channel: string, callback: () => void) => () => void
+
+      pluginsList: () => Promise<{ success: boolean; plugins: PluginManifest[]; error?: string }>
+      pluginsInstallFile: () => Promise<{ success: boolean; error?: string }>
+      pluginsOpenDir: () => Promise<{ success: boolean }>
+
+      logAppend: (level: string, message: string, detail?: string) => Promise<{ success: boolean }>
+      logGetEntries: () => Promise<{ success: boolean; entries: LogEntry[] }>
+      logClear: () => Promise<{ success: boolean }>
+      logOpenFile: () => Promise<{ success: boolean }>
+
+      // Routing log (FR-11)
+      routingAppend: (entry: RoutingEntry) => Promise<{ success: boolean; error?: string }>
+      routingGetEntries: (dateStr?: string) => Promise<{ success: boolean; entries: RoutingEntry[]; error?: string }>
+      routingGetDates: () => Promise<{ success: boolean; dates: string[]; error?: string }>
+
+      // Session history (FR-11)
+      sessionList: (limit?: number) => Promise<{ success: boolean; sessions: SessionFile[]; error?: string }>
+      sessionRead: (filePath: string) => Promise<{ success: boolean; content: string; error?: string }>
+      sessionWriteSummary: (params: {
+        data: SessionSummaryData
+        apiKey?: string
+      }) => Promise<{ success: boolean; filePath?: string; error?: string }>
+      sessionShouldShowDigest: (lastDate: string | null) => Promise<{ show: boolean }>
+
+      // Learnings / bookmarks (FR-11)
+      learningsSave: (entry: {
+        content: string
+        model: string
+        conversationTitle: string
+        userTags: string[]
+      }) => Promise<{ success: boolean; filePath?: string; error?: string }>
+      learningsOpenDir: () => Promise<{ success: boolean }>
+
+      // Spending CSV export (FR-11)
+      spendingExportCsv: (params: {
+        records: Array<{ id: string; date: string; model: string; amount: number; conversationId?: string }>
+        month?: string
+      }) => Promise<{ success: boolean; filePath?: string; error?: string }>
+
+      db: {
+        conversations: {
+          list: () => Promise<{ success: boolean; data?: DbRow[]; error?: string }>
+          save: (conv: DbRow) => Promise<{ success: boolean; error?: string }>
+          delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        }
+        messages: {
+          list: (conversationId: string) => Promise<{ success: boolean; data?: DbRow[]; error?: string }>
+          save: (msg: DbRow) => Promise<{ success: boolean; error?: string }>
+        }
+        spending: {
+          list: () => Promise<{ success: boolean; data?: DbRow[]; error?: string }>
+          add: (record: DbRow) => Promise<{ success: boolean; error?: string }>
+          clear: () => Promise<{ success: boolean; error?: string }>
+        }
+        settings: {
+          get: (key: string) => Promise<{ success: boolean; value: string | null; error?: string }>
+          set: (key: string, value: string) => Promise<{ success: boolean; error?: string }>
+        }
+      }
+    }
+  }
+}
+
+// Loose row type — actual shapes defined in database/operations.ts
+type DbRow = Record<string, unknown>
+
+// Log entry shape (mirrors src/main/logger.ts)
+type LogEntry = {
+  id: string
+  level: 'info' | 'warn' | 'error'
+  source: 'main' | 'renderer'
+  message: string
+  detail?: string
+  timestamp: number
+}
+
+// Routing entry shape (mirrors src/main/routingLog.ts)
+type RoutingEntry = {
+  timestamp: string
+  queryPreview: string
+  chosenTier: string
+  reason: string
+  confidence: number
+  wasOverridden: boolean
+  conversationId?: string
+  estimatedCost?: number
+}
+
+// Session file listing entry
+type SessionFile = {
+  date: string
+  path: string
+  filename: string
+}
+
+// Session summary data (mirrors src/main/sessionHistory.ts)
+type SessionSummaryData = {
+  startedAt: number
+  endedAt: number
+  messages: Array<{ role: string; content: string; model?: string; cost?: number }>
+  modelBreakdown: { ollama: number; haiku: number; sonnet: number; opus: number }
+  totalCost: number
+  fabricPatternsUsed: string[]
+  arcCalls: number
+  notes?: string
+}
+
+// Plugin manifest shape (mirrors src/main/plugins/loader.ts)
+type PluginManifest = {
+  id: string
+  name: string
+  description: string
+  version: string
+  icon: string
+  tier: 'ollama' | 'haiku' | 'arc-sonnet'
+  commands: string[]
+  systemPrompt: string
+}

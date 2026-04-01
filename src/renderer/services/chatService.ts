@@ -1,0 +1,113 @@
+import { streamOllamaChat } from './ollamaService'
+import { streamClaudeChat } from './claudeService'
+import { loadArcPrompt } from './arcLoader'
+import { ModelTier } from '../stores/types'
+import { estimateCost, estimateTokens } from '../stores/costStore'
+
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+}
+
+export interface SendOptions {
+  content: string
+  tier: ModelTier
+  conversationHistory: ChatMessage[]
+  settings: {
+    claudeApiKey: string
+    ollamaModel: string
+    extendedThinking: boolean
+  }
+  onToken: (token: string) => void
+  onComplete: (fullText: string, cost: number) => void
+  onError: (error: Error) => void
+  signal?: AbortSignal
+  // Plugin overrides — when a plugin is active, these replace the defaults
+  systemPromptOverride?: string
+  tierOverride?: ModelTier
+}
+
+export async function sendMessage(opts: SendOptions): Promise<void> {
+  const {
+    conversationHistory, settings,
+    onToken, onComplete, onError, signal,
+    systemPromptOverride, tierOverride,
+  } = opts
+
+  // Plugin overrides take precedence over router's tier decision
+  const tier = tierOverride ?? opts.tier
+
+  // Build chat messages (filter out system routing messages, keep user/assistant only)
+  const chatHistory = conversationHistory
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+
+  // ── Local: Ollama ─────────────────────────────────────────────
+  if (tier === 'ollama') {
+    await streamOllamaChat(
+      settings.ollamaModel,
+      chatHistory,
+      {
+        onToken,
+        onComplete: (text) => onComplete(text, 0),
+        onError,
+      },
+      signal
+    )
+    return
+  }
+
+  // ── Cloud: Haiku or A.R.C. Sonnet ────────────────────────────
+  if (!settings.claudeApiKey) {
+    onError(new Error('Claude API key not set. Go to Settings → API Keys to add it.'))
+    return
+  }
+
+  // Use plugin systemPrompt if provided, otherwise load A.R.C. prompt
+  let systemPrompt: string
+  if (systemPromptOverride) {
+    systemPrompt = systemPromptOverride
+    console.log('[Chat] Using plugin system prompt override')
+  } else {
+    const { prompt: arcPrompt, source } = await loadArcPrompt()
+    console.log(`[Chat] Using A.R.C. prompt from: ${source}`)
+    systemPrompt = arcPrompt
+  }
+
+  const model =
+    tier === 'haiku' ? 'claude-haiku-4-5-20251001' :
+    tier === 'arc-opus' ? 'claude-opus-4-6' :
+    'claude-sonnet-4-6'
+
+  // Capture exact token counts from the usage event (emitted before onComplete)
+  let exactInputTokens: number | null = null
+  let exactOutputTokens: number | null = null
+
+  await streamClaudeChat(
+    settings.claudeApiKey,
+    model,
+    systemPrompt,
+    chatHistory,
+    {
+      onToken,
+      onComplete: (text) => {
+        // Prefer exact API-reported counts; fall back to text-length estimates only if missing
+        const inputTokens = exactInputTokens ?? estimateTokens(chatHistory.map((m) => m.content).join(' '))
+        const outputTokens = exactOutputTokens ?? estimateTokens(text)
+        const cost = estimateCost(tier, inputTokens, outputTokens)
+        onComplete(text, cost)
+      },
+      onError,
+      onUsage: (usage) => {
+        exactInputTokens = usage.inputTokens
+        exactOutputTokens = usage.outputTokens
+        const cacheHit = usage.cacheRead > 0
+        window.electron.logAppend?.('info',
+          `Claude tokens — model=${model} in=${usage.inputTokens} out=${usage.outputTokens}` +
+          (cacheHit ? ` cacheHit=${usage.cacheRead}` : '')
+        )
+      },
+    },
+    signal
+  )
+}
