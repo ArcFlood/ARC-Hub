@@ -56,17 +56,17 @@
 | Model selector | P1.7 | ✅ Done | 3-tier: Ollama / Haiku / A.R.C. Sonnet |
 | Fabric pattern selector | P1.8 | ✅ Done | Real API integration (see P5 below) |
 
-### P2 — Local Storage & Data Management ⚠️ Partial
+### P2 — Local Storage & Data Management ✅ Complete
 
 | Task | WBS ID | Status | Notes |
 |------|--------|--------|-------|
 | SQLite database schema | P2.1 | ✅ Done | 4 tables: conversations, messages, spending_log, settings |
 | IPC bridge for DB operations | P2.2 | ✅ Done | 10 IPC handlers; db namespace in preload |
-| Conversation persistence | P2.3 | 🔲 Deferred | Conversations reset on app restart |
-| Settings persistence | P2.4 | ⚠️ Partial | Settings persist via localStorage (via Zustand persist middleware — not yet added) |
-| Cost tracking persistence | P2.5 | 🔲 Deferred | Cost resets on restart |
+| Conversation persistence | P2.3 | ✅ Done | conversationStore reads/writes via `db.conversations` + `db.messages` on every mutation |
+| Settings persistence | P2.4 | ✅ Done | settingsStore loads from `db.settings` on startup; persists on every change; strips legacy claudeApiKey on load |
+| Cost tracking persistence | P2.5 | ✅ Done | costStore loads from `db.spending` on startup; 90-day auto-prune; writes on every record |
 
-**Decision:** SQLite integration adds significant complexity (native modules, better-sqlite3 rebuild for Electron). Deferred to keep momentum. Settings persistence and conversation history are the most impactful items to add next.
+**Completed in P7.** SQLite via better-sqlite3, DB at `~/.noah-ai-hub/conversations.db`. All three stores fully migrated off localStorage.
 
 ### P3 — Ollama Integration ✅ (mapped to our Phase 2)
 
