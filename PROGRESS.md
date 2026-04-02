@@ -1,7 +1,7 @@
 # A.R.C. Hub — Build Progress
 (hi there)
-**Last updated:** 2026-04-01
-**App version:** 1.0.0 — COMPLETE
+**Last updated:** 2026-04-02
+**App version:** 2.1.0
 
 > This file tracks implementation progress against the original WBS (`ai_hub_wbs.json`).
 > Updated after each completed implementation step.
@@ -22,6 +22,10 @@
 | P7 | Advanced Features | Analytics, model manager, onboarding | ✅ Complete |
 | P8 | Plugin System | JSON manifests, slash commands, PluginPicker | ✅ Complete |
 | P9 | Phase 9 / WBS Remainder | Conv tags, app menu, tray, docs, 0 TS errors | ✅ Complete |
+| P10 | Security Hardening | API key isolation, plugin injection defense | ✅ Complete |
+| P11 | PRD v2 / 4-Tier Model System | arc-opus, budget warnings, Qwen 3 defaults | ✅ Complete |
+| P12 | FR-11 Observability & Session Logs | Routing log, session history, learnings, CSV export | ✅ Complete |
+| P13 | ARC-Memory Integration | Local RAG over Obsidian vault, MCP server on :8082 | ✅ Complete |
 
 > Note: Our implementation combined WBS phases and re-ordered them for faster delivery.
 > WBS P2 (SQLite) was deprioritized — data currently lives in Zustand (in-memory per session).
@@ -167,15 +171,80 @@
 
 ---
 
+### P10 — Security Hardening ✅ Complete
+
+| Task | Status | Notes |
+|------|--------|-------|
+| API key isolation to main process | ✅ Done | Raw key stored in SQLite DB key `claude-api-key`; renderer gets only `hasApiKey: boolean`; never transits IPC after write |
+| Write-only ApiKeyInput component | ✅ Done | Draft input never stored in state; Save button calls `apiKeySet` IPC; shows configured/not-configured badge only |
+| Remove `claudeApiKey` from renderer state | ✅ Done | Stripped from `AppSettings`, `DEFAULT_SETTINGS`, `chatService.ts` SendOptions, `claudeService.ts` params |
+| Plugin prompt injection defense | ✅ Done | `validateSystemPrompt()` in loader.ts: 8000-char cap + 8 injection regex patterns (ignore previous instructions, jailbreak, etc.) |
+| Plugin ID sanitization | ✅ Done | IDs stripped to `[a-z0-9-_]` only before writing to disk |
+| Security comments in main.ts | ✅ Done | `sandbox: false` and `webSecurity: !isDev` documented with rationale |
+
+### P11 — PRD v2 / 4-Tier Model System ✅ Complete
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Add `arc-opus` tier | ✅ Done | `claude-opus-4-6`, $5/$25 per MTok, `manualOnly: true` — never auto-routed |
+| Update MODEL_REGISTRY | ✅ Done | All 4 tiers: ollama / haiku / arc-sonnet / arc-opus |
+| Update RoutingMode type | ✅ Done | Includes `arc-opus` for manual override only |
+| Update all `Record<ModelTier, ...>` maps | ✅ Done | MessageBadge, MessageInput, PluginPicker, costStore, AnalyticsPanel all updated |
+| Budget warning banner | ✅ Done | Yellow warning at `$10` (configurable), hard block at `$15`; shown in AnalyticsPanel |
+| Qwen 3 14B default Ollama model | ✅ Done | `modelId: 'qwen3:14b'` in MODEL_REGISTRY |
+| CSV export for spending | ✅ Done | `spending:export-csv` IPC handler; Export button in AnalyticsPanel |
+| `budgetWarnLimit` setting | ✅ Done | Added to AppSettings and DEFAULT_SETTINGS |
+| Version bump to 2.0.0 | ✅ Done | package.json |
+
+### P12 — FR-11 Observability & Session Log System ✅ Complete
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Routing JSONL log | ✅ Done | `~/.noah-ai-hub/logs/routing-YYYY-MM-DD.jsonl`; IPC handlers: `routing:append`, `routing:get-entries`, `routing:get-dates` |
+| Session summary writer | ✅ Done | `session:write-summary` → `~/.noah-ai-hub/sessions/YYYY-MM-DD-HH-mm.md`; includes model breakdown, costs, Fabric patterns used |
+| SessionHistoryPanel | ✅ Done | Right-side drawer; date-sorted session list + markdown content viewer; accessible via Cmd+Shift+H and sidebar button |
+| Weekly Digest card | ✅ Done | `WeeklyDigest.tsx` shown on Mondays; 7-day spend, session count, message count; localStorage guard prevents repeat shows |
+| Learnings / bookmarks | ✅ Done | ☆/★ bookmark button on AssistantMessage; `learnings:save` IPC writes to `~/.noah-ai-hub/learnings/`; `learnings:open-dir` IPC |
+| Session History in Help menu | ✅ Done | Native menu item triggers `menu:open-history` IPC event |
+| Preload + electron.d.ts types | ✅ Done | All FR-11 IPC bridges typed: RoutingEntry, SessionFile, SessionSummaryData |
+
+### P13 — ARC-Memory Integration ✅ Complete (v2.1.0)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| `memory-service/` Python project | ✅ Done | Copied into arc-hub repo; managed via `uv` package manager |
+| `ingestion/obsidian_reader.py` | ✅ Done | Walks vault, validates `source:` frontmatter, SHA256 hash per file, `ConversationDoc` dataclass |
+| `ingestion/chunker.py` | ✅ Done | Hierarchical: index-0 summary chunk (200 tok) + section chunks (600 tok, 100 overlap); respects speaker boundaries |
+| `ingestion/embedder.py` | ✅ Done | nomic-embed-text via Ollama `/api/embeddings`; batch=50; exponential backoff (3 retries) |
+| `ingestion/lancedb_writer.py` | ✅ Done | Upsert by `conversation_id` (delete+insert); hash-skip unchanged files; FTS index on `text` column |
+| `ingestion/run_ingest.py` | ✅ Done | tqdm progress bar; skips unchanged files; writes manifest to `~/.noah-ai-hub/memory/last_ingest.json` |
+| `retrieval/hybrid_search.py` | ✅ Done | LanceDB `query_type="hybrid"` (vector + BM25); optional `date_after` filter; vector fallback if FTS index not ready |
+| `mcp_server/server.py` | ✅ Done | FastAPI on `:8082`; `GET /status`, `POST /query`, `POST /ingest` (background task); CORS for localhost |
+| ARC-Memory added to service manager | ✅ Done | `ServiceName` type extended; `service-status/start/stop` IPC handles `arc-memory`; starts via `uv run python -m mcp_server.server` |
+| `memory-query` / `memory-ingest` / `memory-status` IPC | ✅ Done | 3 new handlers in main.ts; proxy to `:8082`; 8s timeout on query |
+| `memoryService.ts` | ✅ Done | Typed wrapper: `searchMemory()`, `getMemoryStatus()`, `triggerIngest()`, `sourceLabel()`, `sourceColor()` |
+| `MemoryPanel.tsx` | ✅ Done | Right-side drawer; search bar → chunk result cards with expand/collapse; index status view with ingest trigger |
+| Sidebar Memory Search button | ✅ Done | Added above Session History; `Cmd+Shift+M` keyboard shortcut |
+| TypeScript 0 errors | ✅ Done | All pre-existing TS errors also fixed: arc-opus in all Record maps, claudeApiKey refs removed, `activeConversation()` call fix |
+| Version bump to 2.1.0 | ✅ Done | package.json |
+
+---
+
 ## Architecture Decisions
 
 **IPC Streaming Pattern** — All API calls (Ollama, Claude, Fabric) run in the Electron main process to avoid CORS. Tokens streamed back to renderer via `event.sender.send(`stream-${streamId}`, data)`. UUID-based stream IDs prevent collisions. AbortController wired through for stop functionality.
 
-**3-Tier Routing** — `routeQuery()` in MessageInput makes automatic tier decisions based on: query complexity, word count, code detection, budget guard, user aggressiveness setting. Routing reason shown in chat when enabled.
+**4-Tier Routing** — `routeQuery()` in MessageInput makes automatic tier decisions based on: query complexity, word count, code detection, budget guard, user aggressiveness setting. arc-opus is manual-only (`manualOnly: true`) — never auto-routed. Routing reason shown in chat when enabled.
 
 **Prompt Caching** — A.R.C. system prompt sent with `cache_control: { type: 'ephemeral' }`. Anthropic caches for 5 minutes, reducing input token cost by ~90% on subsequent calls.
 
 **Fabric REST vs child_process** — Original WBS suggested spawning `fabric` as a child process. We use the REST API (`fabric --serve`) instead — cleaner, no stdout parsing, easier streaming.
+
+**API Key Isolation (P10)** — Raw Claude API key is written to SQLite by main process only (`claude-api-key` setting key). Renderer never holds the raw key — only a `hasApiKey: boolean`. This prevents the key from appearing in renderer memory dumps or transiting IPC on every message.
+
+**Plugin Injection Defense (P10)** — Before writing any plugin JSON, `validateSystemPrompt()` checks: (1) length ≤ 8000 chars, (2) text doesn't match 8 injection patterns (e.g., "ignore previous instructions", "you are now", "jailbreak"). Plugin IDs are sanitized to `[a-z0-9-_]` only.
+
+**ARC-Memory MCP Pattern (P13)** — Memory service mirrors Fabric exactly: Python FastAPI on `:8082`, managed by the same `service-status/start/stop` IPC handlers, shown as a ServiceCard in the sidebar. This makes future services (e.g., a code indexer) trivially addable. LanceDB was chosen over Chroma for embedded operation (no separate server process) and native hybrid search support. nomic-embed-text via Ollama means zero embedding cost and zero privacy leak — embeddings never leave the machine.
 
 ---
 
@@ -183,47 +252,74 @@
 
 ```
 arc-hub/
+├── memory-service/                      ← ARC-Memory Python project (P13)
+│   ├── pyproject.toml                   ← uv deps: lancedb, fastapi, uvicorn, watchdog
+│   ├── ingestion/
+│   │   ├── obsidian_reader.py           ← Parse .md + frontmatter, SHA256 hash
+│   │   ├── chunker.py                   ← Hierarchical chunking (600 tok, 100 overlap)
+│   │   ├── embedder.py                  ← nomic-embed-text via Ollama, batch=50
+│   │   ├── lancedb_writer.py            ← Upsert + FTS index, hash dedup
+│   │   └── run_ingest.py                ← Orchestrator with tqdm + manifest
+│   ├── retrieval/
+│   │   └── hybrid_search.py             ← LanceDB vector + BM25 hybrid query
+│   └── mcp_server/
+│       └── server.py                    ← FastAPI :8082 — /query, /status, /ingest
 ├── src/
 │   ├── main/
-│   │   ├── main.ts              ← IPC handlers for Ollama, Claude, Fabric, services, plugins
+│   │   ├── main.ts                      ← All IPC: Ollama, Claude, Fabric, Memory, services, plugins
 │   │   ├── database/
-│   │   │   ├── db.ts            ← SQLite singleton
-│   │   │   ├── schema.ts        ← 4-table schema
-│   │   │   └── operations.ts    ← CRUD helpers
-│   │   └── plugins/
-│   │       └── loader.ts        ← Scan ~/.noah-ai-hub/plugins/, seed samples
+│   │   │   ├── db.ts                    ← SQLite singleton
+│   │   │   ├── schema.ts                ← 4-table schema
+│   │   │   └── operations.ts            ← CRUD helpers
+│   │   ├── plugins/
+│   │   │   └── loader.ts                ← Scan ~/.noah-ai-hub/plugins/; injection defense (P10)
+│   │   ├── logger.ts                    ← Structured app log (FR-11)
+│   │   ├── routingLog.ts                ← JSONL routing decisions per-day (FR-11)
+│   │   └── sessionHistory.ts            ← Session summaries, learnings, CSV export (FR-11)
 │   ├── preload/
-│   │   └── preload.ts           ← contextBridge security bridge
+│   │   └── preload.ts                   ← contextBridge security bridge
 │   └── renderer/
-│       ├── electron.d.ts        ← TypeScript types for window.electron
+│       ├── electron.d.ts                ← TypeScript types for window.electron
 │       ├── stores/
-│       │   ├── types.ts
+│       │   ├── types.ts                 ← ModelTier (4-tier), ServiceName (inc. arc-memory)
 │       │   ├── conversationStore.ts
-│       │   ├── settingsStore.ts
-│       │   ├── serviceStore.ts
-│       │   └── costStore.ts
+│       │   ├── settingsStore.ts         ← hasApiKey, checkApiKey(), setApiKey() (P10)
+│       │   ├── serviceStore.ts          ← ollama + fabric + arc-memory (P13)
+│       │   ├── costStore.ts             ← 4-tier rates, arc-opus support
+│       │   └── pluginStore.ts
 │       ├── services/
-│       │   ├── arcLoader.ts     ← Load A.R.C. SKILL.md prompt
-│       │   ├── chatService.ts   ← Route to Ollama / Haiku / Sonnet
-│       │   ├── ollamaService.ts ← IPC streaming wrapper
-│       │   ├── claudeService.ts ← IPC streaming wrapper
-│       │   └── fabricService.ts ← IPC streaming wrapper (new in P5)
+│       │   ├── arcLoader.ts             ← Load A.R.C. SKILL.md prompt
+│       │   ├── chatService.ts           ← Route to Ollama / Haiku / Sonnet / Opus
+│       │   ├── ollamaService.ts         ← IPC streaming wrapper
+│       │   ├── claudeService.ts         ← IPC streaming wrapper (no apiKey param — P10)
+│       │   ├── fabricService.ts         ← IPC streaming wrapper
+│       │   └── memoryService.ts         ← searchMemory, getMemoryStatus, triggerIngest (P13)
 │       └── components/
-│           ├── Layout.tsx
-│           ├── Sidebar.tsx
+│           ├── Layout.tsx               ← Memory panel state + Cmd+Shift+M (P13)
+│           ├── Sidebar.tsx              ← Memory Search + Session History buttons
 │           ├── TopBar.tsx
 │           ├── ChatArea.tsx
-│           ├── MessageInput.tsx
+│           ├── MessageInput.tsx         ← 4-tier routing labels + colors
 │           ├── messages/
+│           │   ├── AssistantMessage.tsx ← BookmarkButton (☆/★) for learnings (FR-11)
+│           │   ├── MessageBadge.tsx     ← arc-opus pink badge
+│           │   └── CopyButton.tsx
+│           ├── memory/
+│           │   └── MemoryPanel.tsx      ← Search drawer + chunk cards + index stats (P13)
+│           ├── history/
+│           │   ├── SessionHistoryPanel.tsx ← Session log viewer (FR-11)
+│           │   └── WeeklyDigest.tsx     ← Monday digest card (FR-11)
 │           ├── services/
 │           ├── conversations/
 │           ├── cost/
+│           │   └── AnalyticsPanel.tsx   ← arc-opus tier, budget warning, CSV export (P11)
 │           ├── models/
 │           ├── patterns/
-│           │   └── PatternSelector.tsx  ← Fully wired (new in P5)
 │           ├── plugins/
-│           │   └── PluginPicker.tsx     ← Dropdown in TopBar (new in P8)
+│           ├── debug/
+│           │   └── ErrorLogPanel.tsx    ← Structured log viewer (FR-11)
 │           └── settings/
+│               └── ApiKeyInput.tsx      ← Write-only, status badge only (P10)
 ```
 
 ---
