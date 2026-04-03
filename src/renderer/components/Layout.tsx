@@ -53,7 +53,7 @@ export default function Layout() {
       }
     }
     init().catch((err) => {
-      window.electron.logAppend?.('error', 'Bootstrap failed', String(err))
+      window.electron.logAppend?.('error', 'Bootstrap failed', String(err))?.catch?.(() => {})
     })
 
     const interval = setInterval(checkAllServices, 30_000)
@@ -65,11 +65,15 @@ export default function Layout() {
   // ── Global renderer error capture → log pipe ─────────────────
   useEffect(() => {
     const onError = (e: ErrorEvent) => {
-      window.electron.logAppend?.('error', e.message, e.error?.stack ?? e.filename)
+      window.electron.logAppend?.('error', e.message, e.error?.stack ?? e.filename)?.catch?.(() => {})
     }
     const onUnhandled = (e: PromiseRejectionEvent) => {
-      const detail = e.reason instanceof Error ? e.reason.stack : String(e.reason)
-      window.electron.logAppend?.('error', 'Unhandled promise rejection', detail)
+      // Guard: skip IPC-related rejections to prevent a cascade where a failed
+      // logAppend call itself becomes an unhandled rejection that re-triggers this.
+      const reason = String(e.reason)
+      if (reason.includes('No handler registered') || reason.includes('log:append')) return
+      const detail = e.reason instanceof Error ? e.reason.stack : reason
+      window.electron.logAppend?.('error', 'Unhandled promise rejection', detail)?.catch?.(() => {})
     }
     window.addEventListener('error', onError)
     window.addEventListener('unhandledrejection', onUnhandled)
