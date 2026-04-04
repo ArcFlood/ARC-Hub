@@ -9,6 +9,7 @@ import { useTraceStore } from '../stores/traceStore'
 import { sendMessage } from '../services/chatService'
 import { routeQuery, TIER_DISPLAY_LABELS } from '../utils/routing'
 import { searchMemory, MemoryCitation, sourceLabel } from '../services/memoryService'
+import { saveConversationToVault } from '../utils/exportConversation'
 
 interface Props {
   conversationId: string | null
@@ -303,6 +304,34 @@ export default function MessageInput({ conversationId }: Props) {
         })
         if (cost > 0) {
           addRecord({ id: crypto.randomUUID(), amount: cost, model: effectiveTier, conversationId: convId })
+        }
+        const conversationForVault = useConversationStore.getState().conversations.find((conversation) => conversation.id === convId)
+        if (conversationForVault) {
+          saveConversationToVault(conversationForVault)
+            .then((result) => {
+              appendTraceEntry({
+                source: 'memory',
+                level: result.success ? 'success' : 'warn',
+                title: result.success ? 'Conversation written to ArcVault' : 'Conversation write-back failed',
+                detail: result.success
+                  ? result.filePath ?? 'ARCOS conversation exported to vault.'
+                  : result.error ?? 'Vault write failed.',
+                conversationId: convId,
+                relatedPanels: ['memory', 'chat', 'history'],
+                entityLabel: conversationForVault.id,
+              })
+            })
+            .catch((vaultError) => {
+              appendTraceEntry({
+                source: 'memory',
+                level: 'error',
+                title: 'Conversation write-back threw an error',
+                detail: String(vaultError),
+                conversationId: convId,
+                relatedPanels: ['memory', 'chat', 'history'],
+                entityLabel: conversationForVault.id,
+              })
+            })
         }
         setStagedMemory(null)
         setMemoryError(null)

@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useServiceStore } from '../../stores/serviceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { LocalModelInfo } from '../../stores/types'
 
 interface PullState {
   status: string
@@ -53,8 +54,11 @@ const SUGGESTED_MODELS = [
 export default function ModelManager() {
   const ollamaRunning = useServiceStore((s) => s.getService('ollama')?.running ?? false)
   const availableModels = useServiceStore((s) => s.availableOllamaModels)
+  const availableModelDetails = useServiceStore((s) => s.availableOllamaModelDetails)
   const fetchOllamaModels = useServiceStore((s) => s.fetchOllamaModels)
+  const fetchOllamaModelDetails = useServiceStore((s) => s.fetchOllamaModelDetails)
   const autoFixOllamaModel = useSettingsStore((s) => s.autoFixOllamaModel)
+  const selectedModel = useSettingsStore((s) => s.settings.ollamaModel)
 
   const [pullInput, setPullInput] = useState('')
   const [pulling, setPulling] = useState<string | null>(null)
@@ -62,6 +66,21 @@ export default function ModelManager() {
   const [deletingModel, setDeletingModel] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    if (!ollamaRunning) return
+    fetchOllamaModelDetails().catch(() => {})
+  }, [fetchOllamaModelDetails, ollamaRunning])
+
+  const modelDetailsByName = useMemo(
+    () => new Map(availableModelDetails.map((model) => [model.name, model])),
+    [availableModelDetails]
+  )
+
+  const totalInstalledSizeBytes = useMemo(
+    () => availableModelDetails.reduce((sum, model) => sum + model.sizeBytes, 0),
+    [availableModelDetails]
+  )
 
   // ── Pull a model ─────────────────────────────────────────────────
   const handlePull = async (modelName: string) => {
@@ -95,6 +114,7 @@ export default function ModelManager() {
         fetchOllamaModels().then((models) => {
           if (models.length > 0) autoFixOllamaModel(models)
         })
+        fetchOllamaModelDetails().catch(() => {})
         setTimeout(() => setPullState(null), 2000)
       } else if (data.type === 'error') {
         cleanup()
@@ -123,6 +143,7 @@ export default function ModelManager() {
       const result = await window.electron.ollamaDeleteModel(modelName)
       if (result.success) {
         await fetchOllamaModels()
+        await fetchOllamaModelDetails()
       } else {
         setError(result.error ?? 'Delete failed')
       }
@@ -153,25 +174,25 @@ export default function ModelManager() {
         <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">
           Installed ({availableModels.length})
         </p>
+        {availableModelDetails.length > 0 && (
+          <p className="mb-2 text-[11px] text-text-muted">
+            Total disk usage: {formatSize(totalInstalledSizeBytes)}
+          </p>
+        )}
         {availableModels.length === 0 ? (
           <p className="text-xs text-text-muted italic">No models installed</p>
         ) : (
           <div className="space-y-1">
             {availableModels.map((m) => (
-              <div
+              <InstalledModelCard
                 key={m}
-                className="flex items-center justify-between px-3 py-2 bg-background rounded-lg border border-border group"
-              >
-                <span className="text-sm text-text font-mono">{m}</span>
-                <button
-                  onClick={() => handleDelete(m)}
-                  disabled={deletingModel === m || pulling !== null}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity text-xs text-danger hover:text-danger/80 disabled:opacity-30"
-                  title={`Delete ${m}`}
-                >
-                  {deletingModel === m ? '...' : 'Delete'}
-                </button>
-              </div>
+                modelName={m}
+                selected={selectedModel === m}
+                details={modelDetailsByName.get(m)}
+                deleting={deletingModel === m}
+                disableActions={pulling !== null}
+                onDelete={() => handleDelete(m)}
+              />
             ))}
           </div>
         )}
@@ -266,4 +287,71 @@ export default function ModelManager() {
       </div>
     </div>
   )
+}
+
+function InstalledModelCard({
+  modelName,
+  details,
+  selected,
+  deleting,
+  disableActions,
+  onDelete,
+}: {
+  modelName: string
+  details?: LocalModelInfo
+  selected: boolean
+  deleting: boolean
+  disableActions: boolean
+  onDelete: () => void
+}) {
+  const recommendation = SUGGESTED_MODELS.find((model) => model.name === modelName)
+
+  return (
+    <div className="rounded-lg border border-border bg-background px-3 py-2 group">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-sm text-text font-mono">{modelName}</span>
+            {selected && (
+              <span className="text-[10px] rounded bg-accent/20 px-1 py-0 text-accent font-semibold">
+                ACTIVE
+              </span>
+            )}
+            {recommendation?.badge && (
+              <span className="text-[10px] rounded bg-success/15 px-1 py-0 text-success font-semibold">
+                {recommendation.badge}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-[11px] text-text-muted">
+            {[
+              details?.parameterSize,
+              details?.quantizationLevel,
+              details?.family,
+              details ? formatSize(details.sizeBytes) : null,
+            ].filter(Boolean).join(' · ') || 'Model metadata unavailable'}
+          </p>
+          {recommendation?.desc && (
+            <p className="mt-1 text-[11px] leading-snug text-text-muted">{recommendation.desc}</p>
+          )}
+        </div>
+        <button
+          onClick={onDelete}
+          disabled={deleting || disableActions}
+          className="opacity-0 group-hover:opacity-100 transition-opacity text-xs text-danger hover:text-danger/80 disabled:opacity-30"
+          title={`Delete ${modelName}`}
+        >
+          {deleting ? '...' : 'Delete'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function formatSize(bytes: number): string {
+  if (bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  const value = bytes / 1024 ** exponent
+  return `${value >= 10 || exponent === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[exponent]}`
 }

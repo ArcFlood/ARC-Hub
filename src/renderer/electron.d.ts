@@ -9,6 +9,7 @@ declare global {
       loadArcPrompts: () => Promise<{ success: boolean; content?: string; source?: string; error?: string }>
 
       ollamaListModels: () => Promise<{ success: boolean; models: string[] }>
+      ollamaListModelDetails: () => Promise<{ success: boolean; models: LocalModelInfo[] }>
       ollamaStreamStart: (params: {
         streamId: string; model: string
         messages: Array<{ role: string; content: string }>
@@ -56,6 +57,25 @@ declare global {
         title: string
         content: string
       }) => Promise<{ success: boolean; filePath?: string; error?: string }>
+      layoutExport: (params: {
+        label: string
+        layout: unknown
+        exportedAt: string
+        product: string
+        version: number
+      }) => Promise<{ success: boolean; filePath?: string; error?: string }>
+      layoutImport: () => Promise<{
+        success: boolean
+        filePath?: string
+        payload?: {
+          label: string
+          layout: unknown
+          exportedAt: string
+          product: string
+          version: number
+        }
+        error?: string
+      }>
 
       ollamaPullModel: (params: { streamId: string; modelName: string }) => Promise<void>
       ollamaDeleteModel: (modelName: string) => Promise<{ success: boolean; error?: string }>
@@ -109,8 +129,10 @@ declare global {
       memoryIngest: (force?: boolean) => Promise<{ success: boolean; status?: string; message?: string; error?: string }>
       memoryStatus: () => Promise<{ success: boolean; indexed_docs?: number; indexed_chunks?: number; db_size_mb?: number; last_indexed?: string; ingest_running?: boolean }>
       memoryVaultWrite: (params: {
+        conversationId: string
         title: string
         createdAt: number
+        updatedAt?: number
         messages: Array<{ role: string; content: string; model?: string }>
         tags: string[]
         totalCost: number

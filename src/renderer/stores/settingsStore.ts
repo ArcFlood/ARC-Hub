@@ -39,6 +39,34 @@ interface SettingsStore {
 
 const DB_KEY = 'app-settings'
 
+const NON_CHAT_MODEL_PATTERNS = [
+  /embed/i,
+  /embedding/i,
+  /nomic-embed/i,
+  /mxbai-embed/i,
+  /snowflake-arctic-embed/i,
+  /all-minilm/i,
+  /bge-/i,
+  /\be5-/i,
+]
+
+export function isChatCapableOllamaModel(model: string): boolean {
+  return !NON_CHAT_MODEL_PATTERNS.some((pattern) => pattern.test(model))
+}
+
+export function filterChatCapableOllamaModels(models: string[]): string[] {
+  return models.filter(isChatCapableOllamaModel)
+}
+
+function pickPreferredChatModel(models: string[]): string | null {
+  if (models.length === 0) return null
+  const preferredOrder = ['qwen3:14b', 'qwen3:7b', 'qwen2.5-coder:14b', 'deepseek-r1:14b']
+  for (const preferred of preferredOrder) {
+    if (models.includes(preferred)) return preferred
+  }
+  return models[0]
+}
+
 function persistSettings(settings: AppSettings): void {
   window.electron.db.settings
     .set(DB_KEY, JSON.stringify(settings))
@@ -130,10 +158,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   },
 
   autoFixOllamaModel: (availableModels) => {
-    if (availableModels.length === 0) return
+    const chatModels = filterChatCapableOllamaModels(availableModels)
+    if (chatModels.length === 0) return
     const { ollamaModel } = get().settings
-    if (!availableModels.includes(ollamaModel)) {
-      const picked = availableModels[0]
+    if (!chatModels.includes(ollamaModel)) {
+      const picked = pickPreferredChatModel(chatModels)
+      if (!picked) return
       console.log(`[Settings] Model "${ollamaModel}" not found — auto-selecting "${picked}"`)
       set((s) => {
         const settings = { ...s.settings, ollamaModel: picked }

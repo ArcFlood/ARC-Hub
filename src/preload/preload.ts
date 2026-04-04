@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Ollama
   ollamaListModels: () => ipcRenderer.invoke('ollama-list-models'),
+  ollamaListModelDetails: () => ipcRenderer.invoke('ollama-list-model-details'),
   ollamaStreamStart: (params: object) => ipcRenderer.invoke('ollama-stream-start', params),
 
   // Claude (runs in main process — no CORS)
@@ -52,6 +53,8 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Export
   saveConversationMd: (params: object) => ipcRenderer.invoke('save-conversation-md', params),
+  layoutExport: (params: object) => ipcRenderer.invoke('layout:export', params),
+  layoutImport: () => ipcRenderer.invoke('layout:import'),
 
   // Ollama model management
   ollamaPullModel: (params: object) => ipcRenderer.invoke('ollama-pull-model', params),

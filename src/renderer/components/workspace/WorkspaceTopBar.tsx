@@ -14,6 +14,8 @@ export default function WorkspaceTopBar({ onOpenSettings }: WorkspaceTopBarProps
   const showPanel = useWorkspaceStore((s) => s.showPanel)
   const redockPanel = useWorkspaceStore((s) => s.redockPanel)
   const saveCurrentLayout = useWorkspaceStore((s) => s.saveCurrentLayout)
+  const exportCurrentLayout = useWorkspaceStore((s) => s.exportCurrentLayout)
+  const importLayout = useWorkspaceStore((s) => s.importLayout)
   const activateSavedLayout = useWorkspaceStore((s) => s.activateSavedLayout)
   const renameSavedLayout = useWorkspaceStore((s) => s.renameSavedLayout)
   const duplicateSavedLayout = useWorkspaceStore((s) => s.duplicateSavedLayout)
@@ -94,6 +96,22 @@ export default function WorkspaceTopBar({ onOpenSettings }: WorkspaceTopBarProps
             description="Return to a blank PAI workspace palette"
             onClick={() => {
               resetWorkspace()
+              setOpenMenu(null)
+            }}
+          />
+          <MenuItem
+            label="Export Current Layout"
+            description="Save the current grid layout as a portable ARCOS file"
+            onClick={() => {
+              void exportCurrentLayout()
+              setOpenMenu(null)
+            }}
+          />
+          <MenuItem
+            label="Import Layout"
+            description="Load a portable ARCOS layout file into saved layouts"
+            onClick={() => {
+              void importLayout()
               setOpenMenu(null)
             }}
           />

@@ -888,6 +888,124 @@
         "The composer flow is intentionally two-step in this phase: `/memory <query>` stages citations, and the next normal send includes them.",
         "Offline ARC-Memory now degrades inline instead of failing silently."
       ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-035",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Implement ARCOS conversation write-back into the Obsidian vault",
+      "summary": "Connected the existing vault-write path to the active ARCOS conversation flow so completed assistant turns now write the current conversation back into ArcVault automatically. The vault writer now uses stable conversation-keyed filenames, richer frontmatter including conversation_id, updated_at, and message_count, and the chat layer records write-back success or failure in trace so the memory loop is visible rather than silent.",
+      "files_touched": [
+        "documentation/arcos_wbs.md",
+        "arcos/src/main/main.ts",
+        "arcos/src/renderer/electron.d.ts",
+        "arcos/src/renderer/utils/exportConversation.ts",
+        "arcos/src/renderer/components/MessageInput.tsx",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "npm exec tsc -- --noEmit",
+        "npm run lint",
+        "npm run build:dir"
+      ],
+      "notes": [
+        "Implementation for write-back is complete, but WBS item 8.3 remains pending until a live run confirms ARC-Memory watcher ingestion of a newly written ARCOS note.",
+        "Manual sidebar save-to-vault continues to work through the same writer path."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-036",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Fix embedding-model misrouting in local ARCOS chat",
+      "summary": "Patched ARCOS so embedding-only Ollama models such as nomic-embed-text are no longer treated as valid chat targets. The installed model list is now filtered to chat-capable models, auto-selection prefers known chat defaults, and the chat service now recovers at send time by switching away from an embedding-only saved model before making an Ollama request.",
+      "files_touched": [
+        "arcos/src/renderer/stores/settingsStore.ts",
+        "arcos/src/renderer/stores/serviceStore.ts",
+        "arcos/src/renderer/services/chatService.ts",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "npm exec tsc -- --noEmit",
+        "npm run lint",
+        "npm run build:dir"
+      ],
+      "notes": [
+        "This fix unblocked the Phase 8 write-back QA pass after ARCOS attempted to chat with nomic-embed-text and received an Ollama 400 error.",
+        "The packaged app was rebuilt after the fix."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-037",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Fix Obsidian citation URI generation for ARC-Memory results",
+      "summary": "Patched ARC-Memory citation generation so Obsidian links are built from the configured VAULT_PATH instead of a hardcoded vault name, and file targets are URL-encoded correctly. This fixes retrieval-result citations for notes whose paths include folders, spaces, or other characters that were previously passed through as raw strings.",
+      "files_touched": [
+        "arcos/memory-service/mcp_server/server.py",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile memory-service/mcp_server/server.py",
+        "npm run build:dir"
+      ],
+      "notes": [
+        "The packaged app was rebuilt so the bundled memory-service includes the URI fix.",
+        "Phase 9.2 remains pending until you retest citation opening in the rebuilt app."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-038",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Verify ARCOS vault-note ingestion and searchability",
+      "summary": "Verified that ARCOS-written notes under /Users/noahpowell/ArcVault/arcos are valid memory inputs and become searchable once ARC-Memory ingests them. The two ARCOS notes were present on disk but initially absent from search results because the index had not yet incorporated them; after triggering an ingest, the index advanced from 1086 to 1088 docs and live queries for \"say test number 1\" and \"dogwater\" returned the ARCOS notes as top results.",
+      "files_touched": [
+        "documentation/arcos_wbs.md",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "curl POST /query for 'say test number 1'",
+        "curl POST /query for 'dogwater'",
+        "curl POST /ingest followed by curl GET /status"
+      ],
+      "notes": [
+        "This confirms WBS items 8.3 and 9.1.",
+        "The remaining open memory-loop QA item is 9.2, citation opening in the rebuilt app."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-039",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Complete unified WBS Phase 9 — layout portability and local model management",
+      "summary": "Implemented the remaining Phase 9 portability and operations work in ARCOS. Workspace layouts can now be exported and imported through native file dialogs with sanitizer-backed validation, and the model-management surface now includes installed-model metadata such as disk usage, family, parameter size, quantization, active model state, and recommendation notes while preserving in-app pull and delete actions.",
+      "files_touched": [
+        "documentation/arcos_wbs.md",
+        "arcos/src/main/main.ts",
+        "arcos/src/preload/preload.ts",
+        "arcos/src/renderer/electron.d.ts",
+        "arcos/src/renderer/stores/types.ts",
+        "arcos/src/renderer/stores/serviceStore.ts",
+        "arcos/src/renderer/stores/workspaceStore.ts",
+        "arcos/src/renderer/components/workspace/WorkspaceTopBar.tsx",
+        "arcos/src/renderer/components/models/ModelManager.tsx",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "npm exec tsc -- --noEmit",
+        "npm run lint",
+        "npm run build:dir"
+      ],
+      "notes": [
+        "Imported layouts are passed through the same workspace sanitizer as persisted state, so invalid or overlapping module placements are repaired before activation.",
+        "The package build includes the new layout-transfer IPC and the richer Ollama metadata view."
+      ]
     }
   ]
 }

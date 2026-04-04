@@ -3,6 +3,7 @@ import { streamClaudeChat } from './claudeService'
 import { loadArcPrompt } from './arcLoader'
 import { ModelTier } from '../stores/types'
 import { estimateCost, estimateTokens } from '../stores/costStore'
+import { filterChatCapableOllamaModels, isChatCapableOllamaModel, useSettingsStore } from '../stores/settingsStore'
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
@@ -43,8 +44,18 @@ export async function sendMessage(opts: SendOptions): Promise<void> {
 
   // ── Local: Ollama ─────────────────────────────────────────────
   if (tier === 'ollama') {
+    let chatModel = settings.ollamaModel
+    if (!isChatCapableOllamaModel(chatModel)) {
+      const installedModels = filterChatCapableOllamaModels(await window.electron.ollamaListModels().then((result) => result.models ?? []).catch(() => []))
+      if (installedModels.length === 0) {
+        throw new Error(`Configured Ollama model "${chatModel}" is embedding-only and no chat-capable fallback was found.`)
+      }
+      chatModel = installedModels[0]
+      useSettingsStore.getState().setOllamaModel(chatModel)
+    }
+
     await streamOllamaChat(
-      settings.ollamaModel,
+      chatModel,
       chatHistory,
       {
         onToken,

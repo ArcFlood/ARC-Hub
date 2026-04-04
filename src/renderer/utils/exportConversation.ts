@@ -74,8 +74,10 @@ export async function saveConversationToVault(
   conversation: Conversation
 ): Promise<{ success: boolean; filePath?: string; error?: string }> {
   return window.electron.memoryVaultWrite({
+    conversationId: conversation.id,
     title: conversation.title,
     createdAt: conversation.createdAt,
+    updatedAt: conversation.updatedAt,
     messages: conversation.messages.map((m) => ({
       role: m.role,
       content: m.content,

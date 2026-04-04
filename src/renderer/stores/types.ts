@@ -103,6 +103,15 @@ export interface ServiceStatus {
   links?: ServiceLink[]
 }
 
+export interface LocalModelInfo {
+  name: string
+  sizeBytes: number
+  modifiedAt?: string
+  family?: string
+  parameterSize?: string
+  quantizationLevel?: string
+}
+
 // ── Settings ──────────────────────────────────────────────────────
 export type RoutingMode = 'auto' | 'ollama' | 'haiku' | 'arc-sonnet' | 'arc-opus'
 export type RoutingAggressiveness = 'cost-first' | 'balanced' | 'quality-first'

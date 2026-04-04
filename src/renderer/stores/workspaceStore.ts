@@ -41,6 +41,8 @@ interface WorkspaceStore {
   redockAllPanels: () => void
   setGridSize: (rows: number, columns: number) => void
   saveCurrentLayout: (label: string) => string | null
+  exportCurrentLayout: (label?: string) => Promise<boolean>
+  importLayout: () => Promise<boolean>
   activateSavedLayout: (layoutId: string) => void
   renameSavedLayout: (layoutId: string, label: string) => void
   duplicateSavedLayout: (layoutId: string) => string | null
@@ -462,6 +464,69 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     persist(savedLayout.id, get().layout, savedLayouts)
     set({ savedLayouts, activeLayoutId: savedLayout.id })
     return savedLayout.id
+  },
+
+  exportCurrentLayout: async (label) => {
+    const fallbackLabel = get().activeLayoutId
+      ? get().savedLayouts.find((savedLayout) => savedLayout.id === get().activeLayoutId)?.label
+      : null
+    const exportLabel = (label?.trim() || fallbackLabel || 'ARCOS Layout').trim()
+    const result = await window.electron.layoutExport({
+      label: exportLabel,
+      layout: get().layout,
+      exportedAt: new Date().toISOString(),
+      product: 'ARCOS',
+      version: 1,
+    })
+    if (!result.success) {
+      set((state) => ({
+        diagnostics: uniqueStrings([
+          ...state.diagnostics,
+          result.error ?? 'Layout export failed.',
+        ]),
+      }))
+      return false
+    }
+    return true
+  },
+
+  importLayout: async () => {
+    const result = await window.electron.layoutImport()
+    if (!result.success || !result.payload) {
+      const error = result.error
+      if (error) {
+        set((state) => ({
+          diagnostics: uniqueStrings([...state.diagnostics, error]),
+        }))
+      }
+      return false
+    }
+
+    const payload = result.payload
+    const imported = payload.layout as Partial<WorkspaceLayout>
+    const sanitized = sanitizeLayout({
+      rows: imported.rows ?? DEFAULT_WORKSPACE_LAYOUT.rows,
+      columns: imported.columns ?? DEFAULT_WORKSPACE_LAYOUT.columns,
+      modules: imported.modules ?? [],
+      detachedPanels: imported.detachedPanels ?? [],
+    }, `Imported layout "${payload.label}"`)
+
+    const savedLayout: WorkspaceSavedLayout = {
+      id: `layout-${crypto.randomUUID()}`,
+      label: payload.label?.trim() || 'Imported Layout',
+      layout: cloneLayout(sanitized.layout),
+      createdAt: Date.now(),
+    }
+    const savedLayouts = [...get().savedLayouts, savedLayout]
+    persist(savedLayout.id, sanitized.layout, savedLayouts)
+    set((state) => ({
+      activeLayoutId: savedLayout.id,
+      layout: sanitized.layout,
+      savedLayouts,
+      diagnostics: uniqueStrings([...state.diagnostics, ...sanitized.diagnostics]),
+    }))
+    void window.electron.workspaceSyncDetachedPanels?.(sanitized.layout.detachedPanels)
+    return true
   },
 
   activateSavedLayout: (layoutId) => {

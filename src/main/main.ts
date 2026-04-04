@@ -201,6 +201,14 @@ function buildFabricPatternUrlCandidates(pattern: string): Array<{ url: string; 
   ]
 }
 
+interface LayoutTransferPayload {
+  label: string
+  layout: unknown
+  exportedAt: string
+  product: string
+  version: number
+}
+
 type OpenClawServiceInfo = {
   configPath: string
   workspacePath: string
@@ -529,6 +537,38 @@ ipcMain.handle('ollama-list-models', async () => {
     if (!res.ok) return { success: false, models: [] }
     const data = await res.json() as { models?: Array<{ name: string }> }
     const models = (data.models ?? []).map((m) => m.name)
+    return { success: true, models }
+  } catch {
+    return { success: false, models: [] }
+  }
+})
+
+ipcMain.handle('ollama-list-model-details', async () => {
+  try {
+    const res = await fetch('http://localhost:11434/api/tags', {
+      signal: AbortSignal.timeout(3000),
+    })
+    if (!res.ok) return { success: false, models: [] }
+    const data = await res.json() as {
+      models?: Array<{
+        name: string
+        modified_at?: string
+        size?: number
+        details?: {
+          family?: string
+          parameter_size?: string
+          quantization_level?: string
+        }
+      }>
+    }
+    const models = (data.models ?? []).map((model) => ({
+      name: model.name,
+      sizeBytes: model.size ?? 0,
+      modifiedAt: model.modified_at,
+      family: model.details?.family,
+      parameterSize: model.details?.parameter_size,
+      quantizationLevel: model.details?.quantization_level,
+    }))
     return { success: true, models }
   } catch {
     return { success: false, models: [] }
@@ -932,6 +972,51 @@ ipcMain.handle('save-conversation-md', async (_event, params: {
   }
 })
 
+ipcMain.handle('layout:export', async (_event, params: LayoutTransferPayload) => {
+  const safeName = params.label.replace(/[^a-z0-9\s-]/gi, '').trim().replace(/\s+/g, '-').toLowerCase()
+  const defaultPath = `${safeName || 'arcos-layout'}.arcos-layout.json`
+
+  const result = await dialog.showSaveDialog({
+    defaultPath,
+    filters: [{ name: 'ARCOS Layout', extensions: ['json'] }],
+    properties: ['createDirectory'],
+  })
+
+  if (result.canceled || !result.filePath) return { success: false }
+
+  try {
+    fs.writeFileSync(result.filePath, JSON.stringify(params, null, 2), 'utf8')
+    return { success: true, filePath: result.filePath }
+  } catch (e) {
+    return { success: false, error: String(e) }
+  }
+})
+
+ipcMain.handle('layout:import', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Import ARCOS Layout',
+    filters: [{ name: 'ARCOS Layout', extensions: ['json'] }],
+    properties: ['openFile'],
+  })
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { success: false }
+  }
+
+  try {
+    const filePath = result.filePaths[0]
+    const raw = fs.readFileSync(filePath, 'utf8')
+    const parsed = JSON.parse(raw) as LayoutTransferPayload
+    return {
+      success: true,
+      filePath,
+      payload: parsed,
+    }
+  } catch (e) {
+    return { success: false, error: String(e) }
+  }
+})
+
 // ── IPC: Ollama model management ─────────────────────────────────
 
 /** Pull (download) a model — streams progress events back to renderer */
@@ -1315,8 +1400,10 @@ function slugify(title: string): string {
 }
 
 interface VaultWriteParams {
+  conversationId: string
   title: string
   createdAt: number
+  updatedAt?: number
   messages: Array<{ role: string; content: string; model?: string }>
   tags: string[]
   totalCost: number
@@ -1331,7 +1418,8 @@ ipcMain.handle('memory:vault-write', (_event, params: VaultWriteParams) => {
     const date = new Date(params.createdAt)
     const dateStr = date.toISOString().slice(0, 10)
     const slug = slugify(params.title) || 'conversation'
-    const filename = `${dateStr}_${slug}.md`
+    const conversationKey = slugify(params.conversationId).slice(0, 12) || 'session'
+    const filename = `${dateStr}_${slug}_${conversationKey}.md`
     const dir = path.join(vaultPath, 'arcos')
     fs.mkdirSync(dir, { recursive: true })
     const filePath = path.join(dir, filename)
@@ -1342,7 +1430,9 @@ ipcMain.handle('memory:vault-write', (_event, params: VaultWriteParams) => {
       ? `\ntags: [${params.tags.map((t) => `"${t}"`).join(', ')}]`
       : ''
     const costLine = params.totalCost > 0 ? `\ncost: ${params.totalCost.toFixed(5)}` : ''
-    const header = `---\nsource: arcos\ntitle: "${escapedTitle}"\ndate: ${dateStr}${tagsYaml}${costLine}\n---\n\n`
+    const updatedAtLine = params.updatedAt ? `\nupdated_at: ${new Date(params.updatedAt).toISOString()}` : ''
+    const messageCountLine = `\nmessage_count: ${params.messages.filter((message) => message.role !== 'system').length}`
+    const header = `---\nsource: arcos\nconversation_id: ${params.conversationId}\ntitle: "${escapedTitle}"\ndate: ${dateStr}${updatedAtLine}${tagsYaml}${costLine}${messageCountLine}\n---\n\n`
 
     // Body: format as **User:** / **Assistant:** blocks for the chunker's speaker detection
     const bodyParts: string[] = []

@@ -23,6 +23,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 MCP_PORT = int(os.getenv("MCP_PORT", "8082"))
 MANIFEST_PATH = Path("~/.noah-ai-hub/memory/last_ingest.json").expanduser()
+VAULT_PATH = Path(os.getenv("VAULT_PATH", "")).expanduser()
 
 _ingest_running = False
 _ingest_last_result: dict = {}
@@ -147,6 +149,15 @@ def _chunk_to_dict(chunk) -> dict:
 
 def _chunk_to_citation(chunk) -> dict:
     text = chunk.text
+    vault_name = VAULT_PATH.name or "ArcVault"
+    try:
+        relative_path = (
+            Path(chunk.source_path).resolve().relative_to(VAULT_PATH.resolve())
+            if VAULT_PATH and VAULT_PATH.exists()
+            else Path(chunk.source_path).name
+        )
+    except ValueError:
+        relative_path = Path(chunk.source_path).name
     return {
         "title": chunk.title,
         "date": chunk.date,
@@ -156,8 +167,10 @@ def _chunk_to_citation(chunk) -> dict:
         "score": round(getattr(chunk, "rerank_score", getattr(chunk, "score", 0.0)), 4),
         "compressed": getattr(chunk, "compressed", False),
         "obsidian_uri": (
-            "obsidian://open?vault=ArcVault&file="
-            + chunk.source_path.replace("/Users/noahpowell/ArcVault/", "")
+            "obsidian://open?vault="
+            + quote(vault_name, safe="")
+            + "&file="
+            + quote(relative_path.as_posix(), safe="/")
         ),
     }
 

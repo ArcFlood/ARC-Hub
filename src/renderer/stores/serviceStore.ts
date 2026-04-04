@@ -1,6 +1,7 @@
 import { create } from 'zustand'
-import { ServiceStatus, ServiceName } from './types'
+import { ServiceStatus, ServiceName, LocalModelInfo } from './types'
 import { useTraceStore } from './traceStore'
+import { filterChatCapableOllamaModels, useSettingsStore } from './settingsStore'
 
 const INITIAL_SERVICES: ServiceStatus[] = [
   { name: 'ollama', displayName: 'Ollama', running: false, port: 11434, checking: false },
@@ -12,18 +13,22 @@ const INITIAL_SERVICES: ServiceStatus[] = [
 interface ServiceStore {
   services: ServiceStatus[]
   availableOllamaModels: string[]
+  availableOllamaModelDetails: LocalModelInfo[]
   getService: (name: ServiceName) => ServiceStatus | undefined
   setServiceStatus: (name: ServiceName, updates: Partial<ServiceStatus>) => void
   setAvailableModels: (models: string[]) => void
+  setAvailableModelDetails: (models: LocalModelInfo[]) => void
   checkAllServices: () => Promise<void>
   startService: (name: ServiceName) => Promise<void>
   stopService: (name: ServiceName) => Promise<void>
   fetchOllamaModels: () => Promise<string[]>
+  fetchOllamaModelDetails: () => Promise<LocalModelInfo[]>
 }
 
 export const useServiceStore = create<ServiceStore>((set, get) => ({
   services: INITIAL_SERVICES,
   availableOllamaModels: [],
+  availableOllamaModelDetails: [],
 
   getService: (name) => get().services.find((s) => s.name === name),
 
@@ -33,13 +38,16 @@ export const useServiceStore = create<ServiceStore>((set, get) => ({
     })),
 
   setAvailableModels: (models) => set({ availableOllamaModels: models }),
+  setAvailableModelDetails: (models) => set({ availableOllamaModelDetails: models }),
 
   fetchOllamaModels: async () => {
     try {
       const result = await window.electron.ollamaListModels()
       if (result.success && result.models.length > 0) {
-        set({ availableOllamaModels: result.models })
-        return result.models
+        const chatModels = filterChatCapableOllamaModels(result.models)
+        set({ availableOllamaModels: chatModels })
+        useSettingsStore.getState().autoFixOllamaModel(chatModels)
+        return chatModels
       }
     } catch {
       // Fall back to an empty model list if Ollama is unavailable.
@@ -47,8 +55,23 @@ export const useServiceStore = create<ServiceStore>((set, get) => ({
     return []
   },
 
+  fetchOllamaModelDetails: async () => {
+    try {
+      const result = await window.electron.ollamaListModelDetails()
+      if (result.success) {
+        const chatCapableNames = new Set(filterChatCapableOllamaModels(result.models.map((model) => model.name)))
+        const filtered = result.models.filter((model) => chatCapableNames.has(model.name))
+        set({ availableOllamaModelDetails: filtered })
+        return filtered
+      }
+    } catch {
+      // Fall back to an empty detail list if Ollama is unavailable.
+    }
+    return []
+  },
+
   checkAllServices: async () => {
-    const { services, setServiceStatus, fetchOllamaModels } = get()
+    const { services, setServiceStatus, fetchOllamaModels, fetchOllamaModelDetails } = get()
     await Promise.all(
       services.map(async (svc) => {
         setServiceStatus(svc.name, { checking: true })
@@ -79,6 +102,7 @@ export const useServiceStore = create<ServiceStore>((set, get) => ({
           // If Ollama just came up, fetch its models
           if (svc.name === 'ollama' && result.running) {
             await fetchOllamaModels()
+            await fetchOllamaModelDetails()
           }
         } catch {
           setServiceStatus(svc.name, { running: false, checking: false })
@@ -88,7 +112,7 @@ export const useServiceStore = create<ServiceStore>((set, get) => ({
   },
 
   startService: async (name) => {
-    const { setServiceStatus, fetchOllamaModels } = get()
+    const { setServiceStatus, fetchOllamaModels, fetchOllamaModelDetails } = get()
     setServiceStatus(name, { checking: true, error: undefined })
     try {
       const result = await window.electron.serviceStart(name)
@@ -117,6 +141,7 @@ export const useServiceStore = create<ServiceStore>((set, get) => ({
         })
         if (name === 'ollama' && status.running) {
           await fetchOllamaModels()
+          await fetchOllamaModelDetails()
         }
       } else {
         setServiceStatus(name, { checking: false, error: result.error })
