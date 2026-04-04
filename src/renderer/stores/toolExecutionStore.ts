@@ -8,6 +8,8 @@ export interface ToolRun {
   type: 'fabric'
   title: string
   toolId: string
+  executionMode?: 'server' | 'cli'
+  stageLabel?: string
   status: 'running' | 'completed' | 'error' | 'aborted'
   input: string
   output: string
@@ -52,20 +54,22 @@ export const useToolExecutionStore = create<ToolExecutionStore>((set, get) => ({
       const patterns = await listFabricPatterns()
       set({ patterns: patterns.length > 0 ? patterns : FALLBACK_PATTERNS })
       useTraceStore.getState().appendEntry({
-        source: 'tool',
+        source: 'fabric',
         level: 'info',
         title: 'Loaded Fabric patterns',
         detail: `${patterns.length > 0 ? patterns.length : FALLBACK_PATTERNS.length} patterns available to ARCOS.`,
+        stage: 'Fabric',
         relatedPanels: ['tools', 'services'],
         entityLabel: 'fabric',
       })
     } catch (error) {
       set({ patterns: FALLBACK_PATTERNS })
       useTraceStore.getState().appendEntry({
-        source: 'tool',
+        source: 'fabric',
         level: 'warn',
         title: 'Using fallback Fabric patterns',
         detail: String(error),
+        stage: 'Fabric',
         relatedPanels: ['tools', 'services'],
         entityLabel: 'fabric',
       })
@@ -120,10 +124,11 @@ export const useToolExecutionStore = create<ToolExecutionStore>((set, get) => ({
     set((state) => ({ runs: [nextRun, ...state.runs].slice(0, MAX_RUNS) }))
 
     useTraceStore.getState().appendEntry({
-      source: 'tool',
+      source: 'fabric',
       level: 'info',
       title: `Started ${patternLabel(pattern)}`,
-      detail: patternDescription(pattern),
+      detail: `${patternDescription(pattern)} Fabric is being used as a workflow stage in the PAI chain.`,
+      stage: 'Fabric',
       conversationId: convId ?? undefined,
       relatedPanels: ['tools', 'execution', 'prompt_inspector'],
       entityLabel: pattern,
@@ -134,6 +139,25 @@ export const useToolExecutionStore = create<ToolExecutionStore>((set, get) => ({
       pattern,
       trimmed,
       {
+        onMeta: (meta) => {
+          set((state) => ({
+            runs: state.runs.map((run) => run.id === runId ? {
+              ...run,
+              executionMode: meta.mode,
+              stageLabel: meta.stage ?? 'Fabric',
+            } : run),
+          }))
+          useTraceStore.getState().appendEntry({
+            source: 'fabric',
+            level: 'info',
+            title: 'Fabric stage engaged',
+            detail: `${patternLabel(pattern)} is running via ${meta.mode === 'server' ? 'Fabric server' : 'Fabric CLI fallback'}.`,
+            stage: meta.stage ?? 'Fabric',
+            conversationId: convId ?? undefined,
+            relatedPanels: ['tools', 'execution', 'prompt_inspector', 'services'],
+            entityLabel: pattern,
+          })
+        },
         onToken: (token) => {
           accumulated += token
           set((state) => ({
@@ -161,10 +185,11 @@ export const useToolExecutionStore = create<ToolExecutionStore>((set, get) => ({
             })
           }
           useTraceStore.getState().appendEntry({
-            source: 'tool',
+            source: 'fabric',
             level: 'success',
             title: `Completed ${patternLabel(pattern)}`,
-            detail: `${output.length} characters returned from Fabric.`,
+            detail: `${output.length} characters returned from Fabric${get().runs.find((run) => run.id === runId)?.executionMode === 'cli' ? ' via CLI fallback' : ''}.`,
+            stage: get().runs.find((run) => run.id === runId)?.stageLabel ?? 'Fabric',
             conversationId: convId ?? undefined,
             relatedPanels: ['tools', 'execution', 'chat'],
             entityLabel: pattern,
@@ -187,10 +212,11 @@ export const useToolExecutionStore = create<ToolExecutionStore>((set, get) => ({
             })
           }
           useTraceStore.getState().appendEntry({
-            source: 'tool',
+            source: 'fabric',
             level: 'error',
             title: `${patternLabel(pattern)} failed`,
             detail: error.message,
+            stage: get().runs.find((run) => run.id === runId)?.stageLabel ?? 'Fabric',
             conversationId: convId ?? undefined,
             relatedPanels: ['tools', 'services', 'execution'],
             entityLabel: pattern,
@@ -212,10 +238,11 @@ export const useToolExecutionStore = create<ToolExecutionStore>((set, get) => ({
         : run),
     }))
     useTraceStore.getState().appendEntry({
-      source: 'tool',
+      source: 'fabric',
       level: 'warn',
       title: 'Aborted Fabric run',
       detail: `Run ${runId.slice(0, 8)} was stopped before completion.`,
+      stage: 'Fabric',
       relatedPanels: ['tools', 'execution'],
       entityLabel: 'fabric',
     })

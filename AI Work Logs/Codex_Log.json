@@ -5,7 +5,7 @@
     "owner": "Codex",
     "project": "AI Project",
     "created_at": "2026-04-03",
-    "last_updated": "2026-04-03",
+    "last_updated": "2026-04-04",
     "version": "1.0",
     "purpose": "Persistent Codex activity log for all work completed on the AI Project."
   },
@@ -678,6 +678,215 @@
       "notes": [
         "This fixes the packaged-resource cause of the ARC-Memory start-then-stop failure.",
         "B.1 remains intentionally out of focus at the user's request, even though the Fabric CLI fallback work is already in place."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-026",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Connect ARC-Memory to ArcVault and enable generic Obsidian ingest",
+      "summary": "Connected ARC-Memory to the Obsidian vault at /Users/noahpowell/ArcVault by adding vault configuration to both the source memory-service and the packaged ARCOS memory-service resource, installing the required nomic-embed-text Ollama embedding model, and relaxing the Obsidian reader so plain markdown notes are indexed as source_type=obsidian instead of being rejected for missing AI-export frontmatter. Also applied the same ingest-reader change to the packaged ARCOS app resource so a service restart picks it up, then started the first full-force ingest against the ArcVault corpus.",
+      "files_touched": [
+        "arcos/memory-service/.env",
+        "arcos/memory-service/ingestion/obsidian_reader.py",
+        "arcos/release/mac-arm64/ARCOS.app/Contents/Resources/memory-service/.env",
+        "arcos/release/mac-arm64/ARCOS.app/Contents/Resources/memory-service/ingestion/obsidian_reader.py",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "Ollama model nomic-embed-text installed successfully",
+        "Forced ingest accepted 1144 markdown files from /Users/noahpowell/ArcVault and began embedding them into LanceDB"
+      ],
+      "notes": [
+        "Before this change, ARC-Memory was pointed at the vault path but indexed zero files because the reader only accepted notes with source frontmatter set to chatgpt, claude, or arcos.",
+        "The running ARC-Memory process must be restarted once to load the updated packaged reader and .env configuration."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-027",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Clean up ARC-Memory result presentation for Obsidian vault search",
+      "summary": "Adjusted ARC-Memory and the ARCOS memory UI so Obsidian search behaves like note search rather than raw chunk debugging. The memory reader now skips empty-note bodies during ingest, the server query path filters placeholder results and deduplicates hits by source_path, and the renderer now labels Obsidian explicitly while replacing the misleading negative percentage score display with simple ranked result positions. Rebuilt the packaged ARCOS app so the updated memory panel behavior is available in the shipped bundle.",
+      "files_touched": [
+        "arcos/memory-service/ingestion/obsidian_reader.py",
+        "arcos/memory-service/mcp_server/server.py",
+        "arcos/src/renderer/services/memoryService.ts",
+        "arcos/src/renderer/components/workspace/MemoryWorkspacePanel.tsx",
+        "arcos/src/renderer/components/memory/MemoryPanel.tsx",
+        "arcos/release/mac-arm64/ARCOS.app/Contents/Resources/memory-service/ingestion/obsidian_reader.py",
+        "arcos/release/mac-arm64/ARCOS.app/Contents/Resources/memory-service/mcp_server/server.py",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "npm exec tsc -- --noEmit",
+        "npm run lint",
+        "npm run build:dir"
+      ],
+      "notes": [
+        "The running ARC-Memory service must be restarted once to load the rebuilt packaged server code.",
+        "Existing stale empty-note rows are suppressed at query time; future ingests also skip empty notes at the reader level."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-028",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Close ARCOS rebuild QA and acceptance phase",
+      "summary": "Marked the ARCOS rebuild QA phase complete in the WBS based on the packaged-app acceptance passes already completed: empty-workspace startup, module add/remove flow, snapped resizing, layout save-and-restore, draggable title bar behavior, core PAI module operation inside the pocket-grid shell, and the follow-up memory result cleanup pass. The rebuild track is now complete, with the remaining Fabric 404 issue preserved as a separate deferred bug-track item rather than a blocker on the rebuild phase set.",
+      "files_touched": [
+        "documentation/arcos_wbs.md",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "notes": [
+        "This closes the planned rebuild phases through QA/acceptance.",
+        "B.1 Fabric remains open by choice and is not part of the completed rebuild acceptance set."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-029",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Refresh stale memory planning docs and align architecture plan with PAI execution chain",
+      "summary": "Rewrote the memory PRD and memory WBS so they reflect the current ARC-Memory implementation rather than the original bootstrap assumptions. The updated docs now describe broad ArcVault ingestion, general Obsidian note support, implemented ARCOS panel/service integration, and the real remaining gaps: /memory composer integration, ARCOS write-back, and formal validation work. I also rewrote the ARCOS Architecture Plan to make the intended execution path explicit: ARCOS app -> user prompt -> PAI core context -> OpenClaw -> Fabric -> prompt rebuilder -> local model, with supporting systems and fallback behavior described around that main chain.",
+      "files_touched": [
+        "documentation/rag_memory_prd.json",
+        "documentation/rag_memory_wbs.md",
+        "documentation/ARCOS Architecture Plan.txt",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "rag_memory_prd.json validated with jq"
+      ],
+      "notes": [
+        "The prior architecture plan described a more generic orchestration pipeline and did not clearly state the OpenClaw -> Fabric -> prompt rebuilder -> local model chain.",
+        "The new memory WBS is now a remaining-work document rather than a stale initial-build checklist."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-030",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Consolidate planning docs into one active PRD and one active WBS",
+      "summary": "Collapsed the documentation set into a single active ARCOS PRD, a single active ARCOS WBS, and the ARCOS architecture plan as the governing reference. The new PRD now combines the valid parts of the old ARCOS, AI Hub, and memory planning work around the canonical PAI execution chain, while the new WBS separates completed foundations from the real remaining work. Removed the stale assistant, memory, and gameplan documents from the documentation folder so only active planning artifacts remain.",
+      "files_touched": [
+        "documentation/arcos_prd.json",
+        "documentation/arcos_wbs.md",
+        "documentation/ai_assistant_prd.json",
+        "documentation/ai_assistant_prd_v2.json",
+        "documentation/ai_hub_wbs.json",
+        "documentation/rag_memory_prd.json",
+        "documentation/rag_memory_wbs.md",
+        "documentation/RAG_Obsidian_Gameplan.md",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "arcos_prd.json validated with jq",
+        "documentation folder reduced to ARCOS Architecture Plan.txt, arcos_prd.json, and arcos_wbs.md"
+      ],
+      "notes": [
+        "The architecture plan remains the main driving document and is now referenced directly by the unified WBS.",
+        "The unified PRD includes remaining work items such as Fabric reliability, memory composer integration, write-back, layout import/export, local model management, and observability depth."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-031",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Complete unified WBS Phase 5 — Fabric reliability and chain role",
+      "summary": "Completed the first remaining phase from the unified ARCOS WBS by tightening Fabric execution reliability and making Fabric-stage participation explicit in the UI. The main-process Fabric runner now tries multiple server route shapes before falling back cleanly to the Fabric CLI, eliminating the lingering 404-style packaged failure path. I also added explicit Fabric-stage metadata to the trace model, surfaced execution mode and stage labels in the Tools panel, and updated trace/execution panels so Fabric now reads as a visible workflow stage in the PAI chain rather than just a generic tool run.",
+      "files_touched": [
+        "documentation/arcos_wbs.md",
+        "arcos/src/main/main.ts",
+        "arcos/src/renderer/stores/traceStore.ts",
+        "arcos/src/renderer/services/fabricService.ts",
+        "arcos/src/renderer/stores/toolExecutionStore.ts",
+        "arcos/src/renderer/components/workspace/ToolsPanel.tsx",
+        "arcos/src/renderer/components/workspace/TracePanel.tsx",
+        "arcos/src/renderer/components/workspace/ExecutionTracePanel.tsx",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "npm exec tsc -- --noEmit",
+        "npm run lint",
+        "npm run build:dir"
+      ],
+      "notes": [
+        "Fabric execution now reports whether it ran through the server path or CLI fallback.",
+        "This phase improved chain visibility, but it did not yet move memory into the composer or implement write-back."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-032",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Complete unified WBS Phase 6 — OpenClaw runtime integration",
+      "summary": "Inserted an explicit OpenClaw phase into the unified ARCOS plan and implemented the first real OpenClaw integration slice in the app. ARCOS now treats OpenClaw as a first-class service in the runtime panel, inspects the live ~/.openclaw configuration boundary to determine gateway state and paths, and exposes direct entry points to the OpenClaw control UI, workspace, logs, and config without cloning the OpenClaw codebase into ARCOS.",
+      "files_touched": [
+        "documentation/arcos_prd.json",
+        "documentation/arcos_wbs.md",
+        "arcos/src/main/main.ts",
+        "arcos/src/preload/preload.ts",
+        "arcos/src/renderer/electron.d.ts",
+        "arcos/src/renderer/stores/types.ts",
+        "arcos/src/renderer/stores/serviceStore.ts",
+        "arcos/src/renderer/components/services/ServiceCard.tsx",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "npm exec tsc -- --noEmit",
+        "npm run lint",
+        "npm run build:dir",
+        "arcos_prd.json validated with jq"
+      ],
+      "notes": [
+        "OpenClaw is integrated by reference from ~/.openclaw rather than cloned into the ARCOS repo.",
+        "This phase adds runtime visibility and launch points, not full prompt-path handoff through OpenClaw."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-033",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Fold claw-code-parity architectural patterns into the unified ARCOS WBS",
+      "summary": "Reviewed the claw-code-parity roadmap and parity docs to identify the parts that materially improve ARCOS architecture rather than just its terminal implementation details. Added concrete WBS work for explicit execution lifecycle states, typed event schemas, normalized failure taxonomy, structured recovery policies, degraded-mode reporting, and future coding-runtime awareness so ARCOS can mature into a machine-readable control plane instead of depending on log-shaped state.",
+      "files_touched": [
+        "documentation/arcos_wbs.md",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "notes": [
+        "The useful carryover from claw-code-parity is event/state architecture, not tmux or TUI-specific mechanics.",
+        "Branch/worktree awareness was added as future coding-runtime metadata rather than immediate core UI work."
+      ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-034",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Complete unified WBS Phase 7 — memory in active prompt composition",
+      "summary": "Implemented `/memory` directly in the ARCOS message composer. The composer now runs ARC-Memory searches from `/memory <query>`, shows inline loading and error states, stages retrieved citations above the input, supports per-citation removal and direct Obsidian opening, and injects the retained memory context into the next outgoing prompt without changing the user-visible message text.",
+      "files_touched": [
+        "documentation/arcos_wbs.md",
+        "arcos/src/renderer/components/MessageInput.tsx",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "npm exec tsc -- --noEmit",
+        "npm run lint",
+        "npm run build:dir"
+      ],
+      "notes": [
+        "The composer flow is intentionally two-step in this phase: `/memory <query>` stages citations, and the next normal send includes them.",
+        "Offline ARC-Memory now degrades inline instead of failing silently."
       ]
     }
   ]

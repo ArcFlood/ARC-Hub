@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { WorkspacePanelId } from '../workspace/types'
 
 export type TraceLevel = 'info' | 'success' | 'warn' | 'error'
-export type TraceSource = 'chat' | 'routing' | 'service' | 'system' | 'tool' | 'memory'
+export type TraceSource = 'chat' | 'routing' | 'service' | 'system' | 'tool' | 'memory' | 'fabric'
 
 export interface TraceEntry {
   id: string
@@ -11,6 +11,7 @@ export interface TraceEntry {
   source: TraceSource
   title: string
   detail?: string
+  stage?: string
   conversationId?: string
   relatedPanels?: WorkspacePanelId[]
   entityLabel?: string

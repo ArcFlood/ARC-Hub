@@ -76,6 +76,9 @@ export default function TracePanel() {
               {entry.detail && (
                 <p className="mt-2 text-xs leading-5 opacity-90">{entry.detail}</p>
               )}
+              {entry.stage && (
+                <p className="mt-2 text-[11px] uppercase tracking-wider opacity-70">stage: {entry.stage}</p>
+              )}
               {entry.entityLabel && (
                 <p className="mt-2 text-[11px] uppercase tracking-wider opacity-70">{entry.entityLabel}</p>
               )}

@@ -8,6 +8,7 @@ import { ModelTier } from '../stores/types'
 import { useTraceStore } from '../stores/traceStore'
 import { sendMessage } from '../services/chatService'
 import { routeQuery, TIER_DISPLAY_LABELS } from '../utils/routing'
+import { searchMemory, MemoryCitation, sourceLabel } from '../services/memoryService'
 
 interface Props {
   conversationId: string | null
@@ -23,6 +24,14 @@ export default function MessageInput({ conversationId }: Props) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [memorySearching, setMemorySearching] = useState(false)
+  const [memoryError, setMemoryError] = useState<string | null>(null)
+  const [stagedMemory, setStagedMemory] = useState<{
+    query: string
+    citations: MemoryCitation[]
+    queryTimeMs: number
+    totalResults: number
+  } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -33,6 +42,7 @@ export default function MessageInput({ conversationId }: Props) {
 
   const settings = useSettingsStore((s) => s.settings)
   const ollamaRunning = useServiceStore((s) => s.getService('ollama')?.running ?? false)
+  const memoryRunning = useServiceStore((s) => s.getService('arc-memory')?.running ?? false)
   const addRecord = useCostStore((s) => s.addRecord)
   const spendingToday = useCostStore((s) => s.getSummary().today)
 
@@ -54,8 +64,16 @@ export default function MessageInput({ conversationId }: Props) {
     const t = text.trim()
     if (!t.startsWith('/')) return null
     const firstWord = t.split(/\s+/)[0]
+    if (firstWord === '/memory') return null
     return findByCommand(firstWord)
   }, [text, findByCommand])
+
+  const memoryCommandQuery = useMemo(() => {
+    const trimmed = text.trim()
+    if (!trimmed.startsWith('/memory')) return null
+    const query = trimmed.slice('/memory'.length).trim()
+    return query || null
+  }, [text])
 
   const route = useMemo(
     () => text.trim()
@@ -72,9 +90,62 @@ export default function MessageInput({ conversationId }: Props) {
       ? `Plugin: ${activePlugin.name} → ${TIER_DISPLAY_LABELS[activePlugin.tier]}`
       : route?.reason ?? ''
 
+  const handleMemorySearch = async () => {
+    const query = memoryCommandQuery?.trim() ?? ''
+    if (!query) {
+      setMemoryError('Use /memory followed by a query.')
+      return
+    }
+    if (!memoryRunning) {
+      setMemoryError('ARC-Memory is offline.')
+      return
+    }
+
+    setMemorySearching(true)
+    setMemoryError(null)
+
+    const result = await searchMemory(query, { limit: 6 })
+    setMemorySearching(false)
+
+    if (!result.success) {
+      setStagedMemory(null)
+      setMemoryError(result.error ?? 'Memory search failed')
+      appendTraceEntry({
+        source: 'memory',
+        level: 'error',
+        title: 'Composer memory search failed',
+        detail: result.error ?? 'Memory search failed',
+        relatedPanels: ['memory', 'chat', 'transparency'],
+        entityLabel: query,
+      })
+      return
+    }
+
+    setStagedMemory({
+      query,
+      citations: result.citations,
+      queryTimeMs: result.query_time_ms,
+      totalResults: result.total_results,
+    })
+    setText('')
+    appendTraceEntry({
+      source: 'memory',
+      level: 'success',
+      title: `Composer memory search: ${query}`,
+      detail: `${result.total_results} results in ${result.query_time_ms}ms.`,
+      relatedPanels: ['memory', 'chat', 'prompt_inspector'],
+      entityLabel: query,
+    })
+  }
+
   const handleSend = async () => {
     const trimmed = text.trim()
-    if (!trimmed || sending) return
+    if (!trimmed || sending || memorySearching) return
+
+    if (trimmed.startsWith('/memory')) {
+      await handleMemorySearch()
+      return
+    }
 
     setError(null)
     setSending(true)
@@ -83,6 +154,7 @@ export default function MessageInput({ conversationId }: Props) {
     // ── Slash command detection ────────────────────────────────
     // If the message starts with a known plugin command, auto-activate it
     // and strip the command prefix from the actual content.
+    const displayContent = trimmed
     let resolvedContent = trimmed
     let resolvedPlugin = activePlugin
 
@@ -110,11 +182,25 @@ export default function MessageInput({ conversationId }: Props) {
     // Add user message to store (show original text including command)
     addMessage(convId, {
       role: 'user',
-      content: trimmed,
+      content: displayContent,
       model: null,
       cost: 0,
       timestamp: Date.now(),
     })
+
+    if (stagedMemory && stagedMemory.citations.length > 0) {
+      const memoryContextBlock = buildMemoryContextBlock(stagedMemory.citations)
+      resolvedContent = `${resolvedContent}\n\n${memoryContextBlock}`
+      appendTraceEntry({
+        source: 'memory',
+        level: 'info',
+        title: 'Injected staged memory into prompt',
+        detail: `${stagedMemory.citations.length} citations from "${stagedMemory.query}" were included.`,
+        conversationId: convId,
+        relatedPanels: ['memory', 'chat', 'prompt_inspector'],
+        entityLabel: stagedMemory.query,
+      })
+    }
 
     // Route decision (may be overridden by plugin tier below)
     const { tier, reason } = routeQuery(resolvedContent, settings.routingMode, settings.routingAggressiveness, ollamaRunning, spendingToday, settings.dailyBudgetLimit)
@@ -218,6 +304,8 @@ export default function MessageInput({ conversationId }: Props) {
         if (cost > 0) {
           addRecord({ id: crypto.randomUUID(), amount: cost, model: effectiveTier, conversationId: convId })
         }
+        setStagedMemory(null)
+        setMemoryError(null)
         setSending(false)
       },
       onError: (err) => {
@@ -248,18 +336,88 @@ export default function MessageInput({ conversationId }: Props) {
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      void handleSend()
     }
   }
 
   return (
     <div className="space-y-2">
+      {stagedMemory && (
+        <div className="rounded-xl border border-border bg-surface px-3 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-accent">Memory Staged</p>
+              <p className="mt-1 text-xs text-text-muted">
+                {stagedMemory.citations.length} citations from "{stagedMemory.query}" · {stagedMemory.queryTimeMs}ms
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setStagedMemory(null)
+                setMemoryError(null)
+              }}
+              className="text-[11px] text-text-muted transition-colors hover:text-text"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="mt-3 space-y-2">
+            {stagedMemory.citations.map((citation, index) => (
+              <div key={`${citation.source_path}-${index}`} className="flex items-start gap-2 rounded-lg border border-border bg-[#12161b] px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-text">{citation.title}</p>
+                  <p className="mt-0.5 text-[11px] text-text-muted">
+                    {sourceLabel(citation.source_type)} · {citation.date}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-text-muted">{citation.excerpt}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    onClick={() => window.electron.openExternal(citation.obsidian_uri)}
+                    className="arcos-action rounded px-2 py-1 text-[10px] uppercase tracking-wider"
+                  >
+                    Obsidian
+                  </button>
+                  <button
+                    onClick={() => {
+                      setStagedMemory((current) => {
+                        if (!current) return current
+                        const citations = current.citations.filter((item) => item.source_path !== citation.source_path)
+                        return citations.length > 0 ? { ...current, citations } : null
+                      })
+                    }}
+                    className="rounded px-2 py-1 text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:text-danger"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {memoryCommandQuery && !sending && (
+        <div className="flex items-center gap-2 px-1 text-xs text-text-muted">
+          <span>🧠</span>
+          <span className="font-medium text-accent">Memory query</span>
+          <span className="opacity-60">{memoryRunning ? `Enter runs search for "${memoryCommandQuery}"` : 'ARC-Memory offline'}</span>
+        </div>
+      )}
+
       {/* Routing preview */}
-      {previewTier && text.trim() && !sending && (
+      {previewTier && text.trim() && !sending && !memoryCommandQuery && (
         <div className="flex items-center gap-2 px-1 text-xs text-text-muted">
           <span>→</span>
           <span className={`font-medium ${TIER_COLORS[previewTier]}`}>{TIER_DISPLAY_LABELS[previewTier]}</span>
           <span className="opacity-60">{previewReason}</span>
+        </div>
+      )}
+
+      {memoryError && (
+        <div className="flex items-center justify-between rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+          <span>{memoryError}</span>
+          <button onClick={() => setMemoryError(null)} className="ml-2 opacity-60 hover:opacity-100">✕</button>
         </div>
       )}
 
@@ -278,8 +436,18 @@ export default function MessageInput({ conversationId }: Props) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={sending ? 'Generating...' : activePlugin ? `${activePlugin.icon} ${activePlugin.name} active — ask anything...` : 'Ask anything or type /command... (Enter to send)'}
-          disabled={sending}
+          placeholder={
+            sending
+              ? 'Generating...'
+              : memoryCommandQuery
+              ? 'Press Enter to search memory...'
+              : activePlugin
+              ? `${activePlugin.icon} ${activePlugin.name} active — ask anything...`
+              : stagedMemory
+              ? 'Ask with staged memory context attached...'
+              : 'Ask anything or type /command... (Enter to send)'
+          }
+          disabled={sending || memorySearching}
           rows={1}
           className="flex-1 bg-transparent resize-none text-sm text-text placeholder:text-text-muted focus:outline-none leading-relaxed disabled:opacity-50 selectable"
           style={{ maxHeight: '200px' }}
@@ -295,14 +463,24 @@ export default function MessageInput({ conversationId }: Props) {
           </button>
         ) : (
           <button
-            onClick={handleSend}
-            disabled={!text.trim()}
+            onClick={() => void handleSend()}
+            disabled={!text.trim() || memorySearching}
             className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-white text-sm"
           >
-            ↑
+            {memorySearching ? '…' : memoryCommandQuery ? '⌕' : '↑'}
           </button>
         )}
       </div>
     </div>
   )
+}
+
+function buildMemoryContextBlock(citations: MemoryCitation[]): string {
+  const entries = citations.map((citation, index) => {
+    const title = citation.title.trim() || 'Untitled note'
+    const excerpt = citation.excerpt.replace(/\s+/g, ' ').trim()
+    return `[${index + 1}] ${title} (${sourceLabel(citation.source_type)}, ${citation.date})\n${excerpt}`
+  })
+
+  return `Relevant memory context:\n${entries.join('\n\n')}`
 }

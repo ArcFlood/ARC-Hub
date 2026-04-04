@@ -6,6 +6,7 @@ const INITIAL_SERVICES: ServiceStatus[] = [
   { name: 'ollama', displayName: 'Ollama', running: false, port: 11434, checking: false },
   { name: 'fabric', displayName: 'Fabric', running: false, port: 8080, checking: false },
   { name: 'arc-memory', displayName: 'ARC-Memory', running: false, port: 8082, checking: false },
+  { name: 'openclaw', displayName: 'OpenClaw', running: false, port: 18789, checking: false, manageable: false },
 ]
 
 interface ServiceStore {
@@ -53,7 +54,18 @@ export const useServiceStore = create<ServiceStore>((set, get) => ({
         setServiceStatus(svc.name, { checking: true })
         try {
           const result = await window.electron.serviceStatus(svc.name)
-          setServiceStatus(svc.name, { running: result.running, pid: result.pid, checking: false })
+          setServiceStatus(svc.name, {
+            running: result.running,
+            pid: result.pid,
+            port: result.port ?? svc.port,
+            displayName: result.displayName ?? svc.displayName,
+            manageable: result.manageable ?? svc.manageable,
+            managementNote: result.managementNote,
+            detailLines: result.detailLines,
+            links: result.links,
+            checking: false,
+            error: undefined,
+          })
           useTraceStore.getState().appendEntry({
             source: 'service',
             level: result.running ? 'success' : 'warn',
@@ -83,7 +95,18 @@ export const useServiceStore = create<ServiceStore>((set, get) => ({
       if (result.success) {
         await new Promise((r) => setTimeout(r, 1800))
         const status = await window.electron.serviceStatus(name)
-        setServiceStatus(name, { running: status.running, checking: false })
+        setServiceStatus(name, {
+          running: status.running,
+          pid: status.pid,
+          port: status.port ?? get().getService(name)?.port,
+          displayName: status.displayName ?? get().getService(name)?.displayName,
+          manageable: status.manageable ?? get().getService(name)?.manageable,
+          managementNote: status.managementNote,
+          detailLines: status.detailLines,
+          links: status.links,
+          checking: false,
+          error: undefined,
+        })
         useTraceStore.getState().appendEntry({
           source: 'service',
           level: status.running ? 'success' : 'warn',

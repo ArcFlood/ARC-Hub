@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   searchMemory, getMemoryStatus, triggerIngest,
-  sourceLabel, sourceColor,
+  sourceLabel, sourceColor, formatMemoryRank,
   MemoryStatus, MemoryChunk, MemoryQueryResult,
 } from '../../services/memoryService'
 
@@ -213,9 +213,7 @@ function ChunkCard({ chunk, obsidianUri }: { chunk: MemoryChunk; obsidianUri?: s
           <p className="text-xs text-base-content/40">{chunk.date} · chunk {chunk.chunk_index + 1}</p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <span className="text-xs text-base-content/30">
-            {(chunk.score * 100).toFixed(0)}%
-          </span>
+          <span className="text-xs text-base-content/30">{formatMemoryRank(chunk)}</span>
           {obsidianUri && (
             <button
               onClick={handleOpenObsidian}

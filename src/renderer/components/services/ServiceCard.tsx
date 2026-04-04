@@ -26,6 +26,14 @@ export default function ServiceCard({ service }: { service: ServiceStatus }) {
     ? 'Running'
     : 'Stopped'
 
+  const openLink = async (target: string, kind: 'url' | 'path') => {
+    if (kind === 'url') {
+      await window.electron.openExternal(target)
+      return
+    }
+    await window.electron.openPath(target)
+  }
+
   return (
     <div
       className={`rounded-xl border p-3 space-y-3 transition-colors duration-300 ${
@@ -52,27 +60,33 @@ export default function ServiceCard({ service }: { service: ServiceStatus }) {
 
       {/* Controls */}
       <div className="flex items-center gap-1.5">
-        {!service.running ? (
-          <ServiceButton
-            label="Start"
-            variant="start"
-            disabled={service.checking || restarting}
-            onClick={() => startService(service.name)}
-          />
+        {service.manageable === false ? (
+          <p className="text-[11px] text-text-muted">{service.managementNote ?? 'Managed outside ARCOS'}</p>
         ) : (
-          <ServiceButton
-            label="Stop"
-            variant="stop"
-            disabled={service.checking || restarting}
-            onClick={() => stopService(service.name)}
-          />
+          <>
+            {!service.running ? (
+              <ServiceButton
+                label="Start"
+                variant="start"
+                disabled={service.checking || restarting}
+                onClick={() => startService(service.name)}
+              />
+            ) : (
+              <ServiceButton
+                label="Stop"
+                variant="stop"
+                disabled={service.checking || restarting}
+                onClick={() => stopService(service.name)}
+              />
+            )}
+            <ServiceButton
+              label={restarting ? 'Restarting...' : 'Restart'}
+              variant="restart"
+              disabled={service.checking || restarting}
+              onClick={handleRestart}
+            />
+          </>
         )}
-        <ServiceButton
-          label={restarting ? 'Restarting...' : 'Restart'}
-          variant="restart"
-          disabled={service.checking || restarting}
-          onClick={handleRestart}
-        />
         <button
           onClick={() => setLogsOpen((v) => !v)}
           className="ml-auto text-[11px] text-text-muted hover:text-text transition-colors"
@@ -99,9 +113,30 @@ export default function ServiceCard({ service }: { service: ServiceStatus }) {
               {service.name === 'fabric' && (
                 <p className="text-text-muted">REST: http://localhost:{service.port}/api/patterns</p>
               )}
+              {service.detailLines?.map((line) => (
+                <p key={line} className="text-text-muted">{line}</p>
+              ))}
             </>
           ) : (
-            <p className="text-text-muted italic">Service not running</p>
+            <>
+              <p className="text-text-muted italic">Service not running</p>
+              {service.detailLines?.map((line) => (
+                <p key={line} className="text-text-muted">{line}</p>
+              ))}
+            </>
+          )}
+          {service.links && service.links.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {service.links.map((link) => (
+                <button
+                  key={`${service.name}-${link.label}`}
+                  onClick={() => openLink(link.target, link.kind)}
+                  className="rounded border border-border px-2 py-1 text-[10px] uppercase tracking-wider text-text-muted transition-colors hover:border-[#93a5b8]/35 hover:text-text"
+                >
+                  {link.label}
+                </button>
+              ))}
+            </div>
           )}
         </div>
       )}

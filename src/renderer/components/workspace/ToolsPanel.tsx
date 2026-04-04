@@ -92,8 +92,9 @@ export default function ToolsPanel() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="arcos-kicker mb-1">Fabric Patterns</p>
-                <p className="text-sm font-semibold text-text">Pattern execution surface</p>
-              </div>
+            <p className="text-sm font-semibold text-text">Pattern execution surface</p>
+            <p className="mt-1 text-xs text-text-muted">Fabric is treated as a workflow stage in the PAI chain, not just a utility button.</p>
+          </div>
               <div className="flex items-center gap-2">
                 <span className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-wider ${
                   fabricRunning ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
@@ -215,6 +216,9 @@ export default function ToolsPanel() {
                         <p className="text-sm font-medium text-text">{run.title}</p>
                         <p className="mt-1 text-[11px] uppercase tracking-wider text-text-muted">
                           {run.status} · {new Date(run.startedAt).toLocaleTimeString()}
+                        </p>
+                        <p className="mt-1 text-[11px] uppercase tracking-wider text-text-muted">
+                          {run.stageLabel ?? 'Fabric'} · {run.executionMode === 'cli' ? 'CLI fallback' : run.executionMode === 'server' ? 'Server' : 'Resolving'}
                         </p>
                       </div>
                       {run.status === 'running' ? (

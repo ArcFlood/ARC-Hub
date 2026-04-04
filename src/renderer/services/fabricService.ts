@@ -5,6 +5,7 @@
  */
 
 export interface FabricStreamCallbacks {
+  onMeta?: (meta: { mode: 'server' | 'cli'; stage?: string }) => void
   onToken: (token: string) => void
   onComplete: (fullText: string) => void
   onError: (err: Error) => void
@@ -38,9 +39,11 @@ export function runFabricPattern(
   const streamId = crypto.randomUUID()
 
   const cleanup = window.electron.onStreamEvent(streamId, (raw: unknown) => {
-    const data = raw as { type: string; token?: string; fullText?: string; error?: string }
+    const data = raw as { type: string; token?: string; fullText?: string; error?: string; mode?: 'server' | 'cli'; stage?: string }
 
-    if (data.type === 'token' && data.token) {
+    if (data.type === 'meta' && data.mode) {
+      callbacks.onMeta?.({ mode: data.mode, stage: data.stage })
+    } else if (data.type === 'token' && data.token) {
       callbacks.onToken(data.token)
     } else if (data.type === 'done') {
       cleanup()

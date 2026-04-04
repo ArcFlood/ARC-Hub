@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('electron', {
   },
 
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
+  openPath: (targetPath: string) => ipcRenderer.invoke('open-path', targetPath),
 
   // Fabric
   fabricListPatterns: () => ipcRenderer.invoke('fabric-list-patterns'),

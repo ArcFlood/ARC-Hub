@@ -17,6 +17,7 @@ export interface MemoryChunk {
   speaker: 'user' | 'ai' | 'mixed'
   text: string
   score: number
+  result_rank?: number
 }
 
 export interface MemoryCitation {
@@ -64,7 +65,7 @@ export async function searchMemory(
       limit: opts.limit ?? 20,
       dateAfter: opts.dateAfter,
     })
-    return raw as MemoryQueryResult
+    return normalizeMemoryQueryResult(raw as MemoryQueryResult)
   } catch (e) {
     return {
       success: false,
@@ -74,6 +75,36 @@ export async function searchMemory(
       total_results: 0,
       error: String(e),
     }
+  }
+}
+
+function normalizeMemoryQueryResult(raw: MemoryQueryResult): MemoryQueryResult {
+  const bestChunkByPath = new Map<string, MemoryChunk>()
+
+  for (const chunk of raw.chunks) {
+    if (!chunk.text.trim()) continue
+
+    const existing = bestChunkByPath.get(chunk.source_path)
+    if (!existing || chunk.score > existing.score) {
+      bestChunkByPath.set(chunk.source_path, chunk)
+    }
+  }
+
+  const chunks = Array.from(bestChunkByPath.values())
+    .sort((a, b) => b.score - a.score)
+    .map((chunk, index) => ({ ...chunk, result_rank: index + 1 }))
+
+  const citationPaths = new Set(chunks.map((chunk) => chunk.source_path))
+  const citations = raw.citations.filter((citation, index, all) => {
+    if (!citationPaths.has(citation.source_path)) return false
+    return all.findIndex((item) => item.source_path === citation.source_path) === index
+  })
+
+  return {
+    ...raw,
+    chunks,
+    citations,
+    total_results: chunks.length,
   }
 }
 
@@ -115,6 +146,7 @@ export function sourceLabel(sourceType: string): string {
     chatgpt: 'ChatGPT',
     claude: 'Claude',
     'arcos': 'ARCOS',
+    obsidian: 'Obsidian',
   }
   return map[sourceType] ?? sourceType
 }
@@ -124,6 +156,11 @@ export function sourceColor(sourceType: string): string {
     chatgpt: '#10a37f',
     claude: '#d97706',
     'arcos': '#8b5cf6',
+    obsidian: '#60a5fa',
   }
   return map[sourceType] ?? '#6b7280'
+}
+
+export function formatMemoryRank(chunk: MemoryChunk): string {
+  return chunk.result_rank ? `#${chunk.result_rank}` : ''
 }

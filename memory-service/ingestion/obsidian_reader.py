@@ -1,17 +1,18 @@
 """
-obsidian_reader.py — Parse Obsidian .md files with frontmatter validation.
+obsidian_reader.py — Parse Obsidian .md files into ConversationDoc records.
 
-Each valid file produces a ConversationDoc. Files without valid frontmatter
-are skipped with a warning. SHA256 hash enables deduplication in LanceDB.
+ARC-Memory originally expected AI-export frontmatter. For a general-purpose
+vault, missing metadata is inferred so plain Obsidian notes can still be
+indexed and retrieved.
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -19,7 +20,7 @@ import frontmatter
 
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_TYPES = {"chatgpt", "claude", "arcos"}
+VALID_SOURCE_TYPES = {"chatgpt", "claude", "arcos", "obsidian"}
 
 
 @dataclass
@@ -54,13 +55,20 @@ def _safe_str(value) -> str:
     return str(value).strip()
 
 
+def _infer_date(path: Path, metadata_date) -> str:
+    """Prefer frontmatter date, otherwise fall back to file mtime."""
+    date = _safe_str(metadata_date)
+    if date:
+        return date
+    return datetime.fromtimestamp(path.stat().st_mtime).date().isoformat()
+
+
 def parse_file(path: Path) -> Optional[ConversationDoc]:
     """
-    Parse a single .md file. Returns ConversationDoc or None if invalid.
+    Parse a single .md file. Returns ConversationDoc or None if unreadable.
 
-    A file is invalid if:
-    - It cannot be read
-    - 'source' frontmatter field is missing or not in VALID_SOURCE_TYPES
+    Plain Obsidian notes without AI-export frontmatter are accepted and
+    normalized as source_type="obsidian".
     """
     raw_bytes: bytes
     try:
@@ -77,19 +85,21 @@ def parse_file(path: Path) -> Optional[ConversationDoc]:
         logger.warning("Frontmatter parse failed for %s: %s", path, e)
         return None
 
-    source_type = _safe_str(post.metadata.get("source", "")).lower()
-    if source_type not in VALID_SOURCE_TYPES:
-        logger.warning(
-            "Skipping %s — 'source' field is %r (expected one of %s)",
+    raw_source_type = _safe_str(post.metadata.get("source", "")).lower()
+    if not raw_source_type:
+        source_type = "obsidian"
+    elif raw_source_type in VALID_SOURCE_TYPES:
+        source_type = raw_source_type
+    else:
+        logger.info(
+            "Normalizing %s — unsupported 'source' field %r → 'obsidian'",
             path.name,
-            source_type or "(missing)",
-            VALID_SOURCE_TYPES,
+            raw_source_type,
         )
-        return None
+        source_type = "obsidian"
 
     title = _safe_str(post.metadata.get("title", path.stem))
-    date_raw = post.metadata.get("date", "")
-    date = _safe_str(date_raw)
+    date = _infer_date(path, post.metadata.get("date", ""))
 
     tags_raw = post.metadata.get("tags", [])
     tags: list[str] = (
@@ -97,6 +107,9 @@ def parse_file(path: Path) -> Optional[ConversationDoc]:
     )
 
     body = post.content.strip()
+    if not body:
+        logger.info("Skipping %s — note body is empty", path.name)
+        return None
 
     return ConversationDoc(
         source_path=str(path.resolve()),
@@ -114,7 +127,7 @@ def walk_vault(vault_path: str | Path) -> list[ConversationDoc]:
     """
     Recursively walk vault_path, parse all .md files, return valid docs.
 
-    Invalid files are skipped and logged — they do not raise.
+    Unreadable or unparseable files are skipped and logged — they do not raise.
     """
     vault = Path(vault_path).expanduser().resolve()
     if not vault.exists():

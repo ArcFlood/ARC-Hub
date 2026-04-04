@@ -162,6 +162,41 @@ def _chunk_to_citation(chunk) -> dict:
     }
 
 
+def _is_meaningful_chunk(chunk) -> bool:
+    title = (chunk.title or "").strip().lower()
+    text = (chunk.text or "").strip()
+
+    if not text:
+        return False
+
+    if title in {"untitled", "new note", "untitled.md"} and len(text) < 40:
+        return False
+
+    return True
+
+
+def _dedupe_chunks_by_source_path(chunks: list) -> list:
+    best_by_path: dict[str, object] = {}
+
+    for chunk in chunks:
+        existing = best_by_path.get(chunk.source_path)
+        chunk_score = getattr(chunk, "rerank_score", getattr(chunk, "score", 0.0))
+        if existing is None:
+            best_by_path[chunk.source_path] = chunk
+            continue
+
+        existing_score = getattr(existing, "rerank_score", getattr(existing, "score", 0.0))
+        if chunk_score > existing_score:
+            best_by_path[chunk.source_path] = chunk
+
+    deduped = list(best_by_path.values())
+    deduped.sort(
+        key=lambda chunk: getattr(chunk, "rerank_score", getattr(chunk, "score", 0.0)),
+        reverse=True,
+    )
+    return deduped
+
+
 def _last_ingest_time() -> Optional[str]:
     try:
         if MANIFEST_PATH.exists():
@@ -270,6 +305,9 @@ async def query(req: QueryRequest) -> QueryResponse:
             compressed = any(getattr(c, "compressed", False) for c in final_chunks)
         except Exception as e:
             logger.warning("Compressor failed, using uncompressed chunks: %s", e)
+
+    final_chunks = [chunk for chunk in final_chunks if _is_meaningful_chunk(chunk)]
+    final_chunks = _dedupe_chunks_by_source_path(final_chunks)
 
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
 

@@ -180,6 +180,98 @@ function listFabricPatternsCli(): string[] {
   return parseFabricPatternList(output)
 }
 
+function buildFabricPatternUrlCandidates(pattern: string): Array<{ url: string; contentType: string; body: string }> {
+  const encoded = encodeURIComponent(pattern)
+  return [
+    {
+      url: `http://localhost:8080/api/pattern/${encoded}`,
+      contentType: 'text/plain',
+      body: '',
+    },
+    {
+      url: `http://localhost:8080/pattern/${encoded}`,
+      contentType: 'text/plain',
+      body: '',
+    },
+    {
+      url: 'http://localhost:8080/api/run',
+      contentType: 'application/json',
+      body: JSON.stringify({ pattern, input: '' }),
+    },
+  ]
+}
+
+type OpenClawServiceInfo = {
+  configPath: string
+  workspacePath: string
+  logsPath: string
+  gatewayPort: number
+  browserPort: number
+  bindHost: string
+  gatewayMode: string
+  gatewayCanvasUrl: string
+  controlUrl: string
+}
+
+function getOpenClawServiceInfo(): OpenClawServiceInfo {
+  const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json')
+  const workspacePath = path.join(os.homedir(), '.openclaw', 'workspace')
+  const logsPath = path.join(os.homedir(), '.openclaw', 'logs')
+
+  const defaults: OpenClawServiceInfo = {
+    configPath,
+    workspacePath,
+    logsPath,
+    gatewayPort: 18789,
+    browserPort: 18791,
+    bindHost: '127.0.0.1',
+    gatewayMode: 'local',
+    gatewayCanvasUrl: 'http://127.0.0.1:18789/__openclaw__/canvas/',
+    controlUrl: 'http://127.0.0.1:18791/',
+  }
+
+  if (!fs.existsSync(configPath)) {
+    return defaults
+  }
+
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8')
+    const parsed = JSON.parse(raw) as {
+      agents?: { defaults?: { workspace?: string } }
+      gateway?: { port?: number; bind?: string; mode?: string }
+    }
+
+    const gatewayPort = parsed.gateway?.port ?? defaults.gatewayPort
+    const bind = parsed.gateway?.bind ?? 'loopback'
+    const bindHost = bind === 'loopback' ? '127.0.0.1' : bind
+    const workspace = parsed.agents?.defaults?.workspace ?? workspacePath
+    const browserPort = gatewayPort + 2
+
+    return {
+      configPath,
+      workspacePath: workspace,
+      logsPath,
+      gatewayPort,
+      browserPort,
+      bindHost,
+      gatewayMode: parsed.gateway?.mode ?? defaults.gatewayMode,
+      gatewayCanvasUrl: `http://${bindHost}:${gatewayPort}/__openclaw__/canvas/`,
+      controlUrl: `http://${bindHost}:${browserPort}/`,
+    }
+  } catch {
+    return defaults
+  }
+}
+
+async function isHttpEndpointReachable(url: string, timeoutMs = 1200): Promise<boolean> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+    return response.status > 0
+  } catch {
+    return false
+  }
+}
+
 // ── App Menu ──────────────────────────────────────────────────────
 
 let tray: Tray | null = null
@@ -666,6 +758,31 @@ ipcMain.handle('service-status', async (_event, name: string) => {
         return { running: r.ok }
       } catch { return { running: false } }
     }
+    if (name === 'openclaw') {
+      const info = getOpenClawServiceInfo()
+      const [gatewayReachable, controlReachable] = await Promise.all([
+        isHttpEndpointReachable(info.gatewayCanvasUrl),
+        isHttpEndpointReachable(info.controlUrl),
+      ])
+      return {
+        running: gatewayReachable || controlReachable,
+        port: info.gatewayPort,
+        displayName: 'OpenClaw',
+        manageable: false,
+        managementNote: 'Managed from the existing .openclaw runtime',
+        detailLines: [
+          `Gateway mode: ${info.gatewayMode}`,
+          `Gateway: ws://${info.bindHost}:${info.gatewayPort}`,
+          `Control UI: ${info.controlUrl}`,
+        ],
+        links: [
+          { label: 'Open Control UI', target: info.controlUrl, kind: 'url' },
+          { label: 'Open Workspace', target: info.workspacePath, kind: 'path' },
+          { label: 'Open Logs', target: info.logsPath, kind: 'path' },
+          { label: 'Open Config', target: info.configPath, kind: 'path' },
+        ],
+      }
+    }
   } catch { return { running: false } }
   return { running: false }
 })
@@ -702,6 +819,9 @@ ipcMain.handle('service-start', (_event, name: string) => {
       p.unref(); serviceProcesses[name] = p
       return { success: true }
     }
+    if (name === 'openclaw') {
+      return { success: false, error: 'OpenClaw is linked from ~/.openclaw and is not started by ARCOS yet.' }
+    }
   } catch (e) { return { success: false, error: String(e) } }
   return { success: false, error: 'Unknown service' }
 })
@@ -724,11 +844,25 @@ ipcMain.handle('service-stop', (_event, name: string) => {
         // Best-effort process cleanup only.
       }
     }
+    if (name === 'openclaw') {
+      return { success: false, error: 'OpenClaw is managed outside ARCOS right now.' }
+    }
     return { success: true }
   } catch (e) { return { success: false, error: String(e) } }
 })
 
 ipcMain.handle('open-external', (_event, url: string) => { shell.openExternal(url) })
+ipcMain.handle('open-path', (_event, targetPath: string) => {
+  try {
+    const error = shell.openPath(targetPath)
+    return Promise.resolve(error).then((result) => ({
+      success: result.length === 0,
+      error: result || undefined,
+    }))
+  } catch (e) {
+    return { success: false, error: String(e) }
+  }
+})
 
 // ── IPC: SQLite Database ──────────────────────────────────────────
 
@@ -937,6 +1071,7 @@ ipcMain.handle('fabric-run-pattern', async (event, params: {
   }
 
   const runViaCli = async () => {
+    emit({ type: 'meta', mode: 'cli', stage: 'Fabric' })
     let fullText = ''
     let errText = ''
     const child = spawn('fabric', ['--pattern', pattern, '--stream'], {
@@ -980,88 +1115,108 @@ ipcMain.handle('fabric-run-pattern', async (event, params: {
     })
   }
 
-  try {
-    const res = await fetch(`http://localhost:8080/api/pattern/${encodeURIComponent(pattern)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: input,
-      signal: controller.signal,
-    })
+  const runViaServer = async () => {
+    const candidates = buildFabricPatternUrlCandidates(pattern).map((candidate) => ({
+      ...candidate,
+      body: candidate.contentType === 'application/json' ? JSON.stringify({ pattern, input }) : input,
+    }))
 
-    if (!res.ok) {
-      let errText = `Fabric error ${res.status}`
+    for (const candidate of candidates) {
       try {
-        errText = await res.text()
-      } catch {
-        // Keep the status-derived error text.
-      }
-      log.error('Fabric pattern error', `pattern=${pattern} ${errText}`)
-      if (res.status !== 404) {
-        emit({ type: 'error', error: errText })
-        return
-      }
+        const res = await fetch(candidate.url, {
+          method: 'POST',
+          headers: { 'Content-Type': candidate.contentType },
+          body: candidate.body,
+          signal: controller.signal,
+        })
 
-      await runViaCli()
-      return
-    }
-
-    const contentType = res.headers.get('content-type') ?? ''
-
-    // Handle SSE/streaming response
-    if (contentType.includes('text/event-stream') || contentType.includes('stream')) {
-      if (!res.body) {
-        emit({ type: 'error', error: 'Fabric returned empty response body' })
-        return
-      }
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let fullText = ''
-
-      let doneReading = false
-      while (!doneReading) {
-        const { done, value } = await reader.read()
-        if (done) {
-          doneReading = true
-          break
-        }
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const raw = line.slice(6).trim()
-            if (raw === '[DONE]') {
-              emit({ type: 'done', fullText })
-              return
-            }
-            try {
-              const parsed = JSON.parse(raw) as Record<string, unknown>
-              // OpenAI-compatible format
-              const choices = parsed.choices as Array<{ delta?: { content?: string } }> | undefined
-              const token = choices?.[0]?.delta?.content
-                ?? (parsed.text as string | undefined)
-                ?? ''
-              if (token) { fullText += token; emit({ type: 'token', token }) }
-            } catch {
-              // raw text line
-              if (raw) { fullText += raw + '\n'; emit({ type: 'token', token: raw + '\n' }) }
-            }
-          } else if (line.trim()) {
-            // Non-SSE streaming line
-            fullText += line + '\n'
-            emit({ type: 'token', token: line + '\n' })
+        if (!res.ok) {
+          if (res.status === 404) {
+            continue
           }
+
+          let errText = `Fabric error ${res.status}`
+          try {
+            errText = await res.text()
+          } catch {
+            // Keep status-derived error text.
+          }
+          throw new Error(errText)
         }
+
+        emit({ type: 'meta', mode: 'server', stage: 'Fabric' })
+        const contentType = res.headers.get('content-type') ?? ''
+
+        if (contentType.includes('text/event-stream') || contentType.includes('stream')) {
+          if (!res.body) {
+            throw new Error('Fabric returned empty response body')
+          }
+          const reader = res.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          let fullText = ''
+
+          let doneReading = false
+          while (!doneReading) {
+            const { done, value } = await reader.read()
+            if (done) {
+              doneReading = true
+              break
+            }
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() ?? ''
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const raw = line.slice(6).trim()
+                if (raw === '[DONE]') {
+                  emit({ type: 'done', fullText })
+                  return
+                }
+                try {
+                  const parsed = JSON.parse(raw) as Record<string, unknown>
+                  const choices = parsed.choices as Array<{ delta?: { content?: string } }> | undefined
+                  const token = choices?.[0]?.delta?.content
+                    ?? (parsed.text as string | undefined)
+                    ?? ''
+                  if (token) {
+                    fullText += token
+                    emit({ type: 'token', token })
+                  }
+                } catch {
+                  if (raw) {
+                    fullText += raw + '\n'
+                    emit({ type: 'token', token: raw + '\n' })
+                  }
+                }
+              } else if (line.trim()) {
+                fullText += line + '\n'
+                emit({ type: 'token', token: line + '\n' })
+              }
+            }
+          }
+          emit({ type: 'done', fullText })
+          return
+        }
+
+        const text = await res.text()
+        emit({ type: 'token', token: text })
+        emit({ type: 'done', fullText: text })
+        return
+      } catch (error) {
+        if ((error as Error).name === 'AbortError') {
+          throw error
+        }
+        log.warn('Fabric server execution attempt failed', `${candidate.url} :: ${String(error)}`)
       }
-      emit({ type: 'done', fullText })
-    } else {
-      // Non-streaming plain text response
-      const text = await res.text()
-      emit({ type: 'token', token: text })
-      emit({ type: 'done', fullText: text })
     }
+
+    throw new Error('Fabric server routes unavailable')
+  }
+
+  try {
+    await runViaServer()
   } catch (e) {
     if ((e as Error).name === 'AbortError') {
       return

@@ -62,6 +62,9 @@ export default function ExecutionTracePanel() {
                 {entry.detail && (
                   <p className="mt-2 text-xs leading-5 text-text-muted">{entry.detail}</p>
                 )}
+                {entry.stage && (
+                  <p className="mt-2 text-[11px] uppercase tracking-wider text-text-muted">stage: {entry.stage}</p>
+                )}
                 {entry.entityLabel && (
                   <p className="mt-2 text-[11px] uppercase tracking-wider text-text-muted">{entry.entityLabel}</p>
                 )}

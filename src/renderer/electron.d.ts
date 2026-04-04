@@ -26,7 +26,16 @@ declare global {
       streamAbort: (streamId: string) => Promise<void>
       onStreamEvent: (streamId: string, callback: (data: unknown) => void) => () => void
 
-      serviceStatus: (name: string) => Promise<{ running: boolean; pid?: number }>
+      serviceStatus: (name: string) => Promise<{
+        running: boolean
+        pid?: number
+        port?: number
+        displayName?: string
+        manageable?: boolean
+        managementNote?: string
+        detailLines?: string[]
+        links?: Array<{ label: string; target: string; kind: 'url' | 'path' }>
+      }>
       serviceStart: (name: string) => Promise<{ success: boolean; error?: string }>
       serviceStop: (name: string) => Promise<{ success: boolean; error?: string }>
       workspaceDetachPanel?: (panelId: string) => Promise<{ success: boolean }>
@@ -34,6 +43,7 @@ declare global {
       workspaceSyncDetachedPanels?: (panelIds: string[]) => Promise<{ success: boolean }>
       onWorkspaceEvent?: (channel: string, callback: (payload: unknown) => void) => () => void
       openExternal: (url: string) => Promise<void>
+      openPath: (targetPath: string) => Promise<{ success: boolean; error?: string }>
 
       fabricListPatterns: () => Promise<{ success: boolean; patterns: string[] }>
       fabricRunPattern: (params: {

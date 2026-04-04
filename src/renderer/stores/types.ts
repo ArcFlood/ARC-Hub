@@ -81,7 +81,13 @@ export interface Conversation {
 }
 
 // ── Service ───────────────────────────────────────────────────────
-export type ServiceName = 'ollama' | 'fabric' | 'arc-memory'
+export type ServiceName = 'ollama' | 'fabric' | 'arc-memory' | 'openclaw'
+
+export interface ServiceLink {
+  label: string
+  target: string
+  kind: 'url' | 'path'
+}
 
 export interface ServiceStatus {
   name: ServiceName
@@ -91,6 +97,10 @@ export interface ServiceStatus {
   pid?: number
   checking: boolean
   error?: string
+  manageable?: boolean
+  managementNote?: string
+  detailLines?: string[]
+  links?: ServiceLink[]
 }
 
 // ── Settings ──────────────────────────────────────────────────────
