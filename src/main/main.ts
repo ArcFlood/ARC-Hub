@@ -221,6 +221,32 @@ type OpenClawServiceInfo = {
   controlUrl: string
 }
 
+type OpenClawGatewaySettings = OpenClawServiceInfo & {
+  token?: string
+  password?: string
+}
+
+type OpenClawAnalysisRequest = {
+  conversationId: string
+  prompt: string
+  conversationSection: string
+  memorySection: string
+  pluginSummary: string
+}
+
+type OpenClawAnalysisPayload = {
+  summary?: string
+  intent?: string
+  workflow?: string
+  recommended_tier?: string
+  recommended_model?: string
+  should_use_fabric?: boolean
+  fabric_pattern?: string | null
+  confidence?: number | null
+  reasoning?: string
+  notes?: string[]
+}
+
 type CodingRuntimeStatus = {
   linkedWorkspacePath: string
   activeRepositoryPath: string | null
@@ -292,6 +318,34 @@ function getOpenClawServiceInfo(): OpenClawServiceInfo {
   }
 }
 
+function getOpenClawGatewaySettings(): OpenClawGatewaySettings {
+  const info = getOpenClawServiceInfo()
+
+  if (!fs.existsSync(info.configPath)) {
+    return info
+  }
+
+  try {
+    const raw = fs.readFileSync(info.configPath, 'utf8')
+    const parsed = JSON.parse(raw) as {
+      gateway?: {
+        auth?: {
+          token?: string
+          password?: string
+        }
+      }
+    }
+
+    return {
+      ...info,
+      token: typeof parsed.gateway?.auth?.token === 'string' ? parsed.gateway.auth.token.trim() : undefined,
+      password: typeof parsed.gateway?.auth?.password === 'string' ? parsed.gateway.auth.password.trim() : undefined,
+    }
+  } catch {
+    return info
+  }
+}
+
 function loadOpenClawContext(): {
   workspacePath: string
   files: Array<{ name: string; path: string; content: string }>
@@ -306,6 +360,313 @@ function loadOpenClawContext(): {
     return [{ name: fileName, path: filePath, content }]
   })
   return { workspacePath, files }
+}
+
+function extractOpenClawMessageText(message: unknown): string {
+  if (!message || typeof message !== 'object') return ''
+  const record = message as { content?: unknown }
+  if (typeof record.content === 'string') return record.content
+  if (!Array.isArray(record.content)) return ''
+
+  return record.content
+    .map((part) => {
+      if (!part || typeof part !== 'object') return ''
+      const block = part as { type?: string; text?: string }
+      return block.type === 'text' && typeof block.text === 'string' ? block.text : ''
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+function extractJsonObject(text: string): string | null {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fenced?.[1]) return fenced[1].trim()
+
+  const firstBrace = text.indexOf('{')
+  const lastBrace = text.lastIndexOf('}')
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null
+  return text.slice(firstBrace, lastBrace + 1).trim()
+}
+
+class OpenClawGatewayClient {
+  private readonly url: string
+  private readonly token?: string
+  private readonly password?: string
+  private readonly pending = new Map<string, {
+    resolve: (value: unknown) => void
+    reject: (reason?: unknown) => void
+  }>()
+  private readonly appVersion: string
+  private ws: WebSocket | null = null
+  private connectPromise: Promise<void> | null = null
+  private connectNonce: string | null = null
+  private connectSent = false
+
+  constructor(settings: OpenClawGatewaySettings) {
+    this.url = `ws://${settings.bindHost}:${settings.gatewayPort}`
+    this.token = settings.token
+    this.password = settings.password
+    this.appVersion = app.getVersion()
+  }
+
+  private buildConnectParams() {
+    return {
+      minProtocol: 3,
+      maxProtocol: 3,
+      client: {
+        id: 'arcos',
+        version: this.appVersion,
+        platform: process.platform,
+        mode: 'webchat',
+      },
+      role: 'operator',
+      scopes: ['operator.read', 'operator.write'],
+      caps: ['tool-events'],
+      auth: {
+        ...(this.token ? { token: this.token } : {}),
+        ...(this.password ? { password: this.password } : {}),
+      },
+      locale: app.getLocale(),
+      ...(this.connectNonce ? { nonce: this.connectNonce } : {}),
+    }
+  }
+
+  private async connect(): Promise<void> {
+    if (this.connectPromise) return this.connectPromise
+
+    this.connectPromise = new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(this.url)
+      let settled = false
+      let fallbackTimer: NodeJS.Timeout | null = null
+
+      const cleanup = () => {
+        if (fallbackTimer) {
+          clearTimeout(fallbackTimer)
+          fallbackTimer = null
+        }
+      }
+
+      const failPending = (error: Error) => {
+        for (const [id, pending] of this.pending) {
+          pending.reject(error)
+          this.pending.delete(id)
+        }
+      }
+
+      ws.addEventListener('open', () => {
+        this.ws = ws
+        this.connectSent = false
+        this.connectNonce = null
+
+        fallbackTimer = setTimeout(() => {
+          if (!this.connectSent) {
+            this.connectSent = true
+            this.request('connect', this.buildConnectParams()).then(() => {
+              if (!settled) {
+                settled = true
+                cleanup()
+                resolve()
+              }
+            }).catch((error) => {
+              if (!settled) {
+                settled = true
+                cleanup()
+                reject(error)
+              }
+            })
+          }
+        }, 250)
+      })
+
+      ws.addEventListener('message', (event) => {
+        let frame: unknown
+        try {
+          frame = JSON.parse(String(event.data ?? ''))
+        } catch {
+          return
+        }
+
+        const record = frame as {
+          type?: string
+          event?: string
+          payload?: { nonce?: string }
+          id?: string
+          ok?: boolean
+          error?: { message?: string }
+        }
+
+        if (record.type === 'event' && record.event === 'connect.challenge') {
+          const nonce = typeof record.payload?.nonce === 'string' ? record.payload.nonce : null
+          if (!this.connectSent) {
+            this.connectNonce = nonce
+            this.connectSent = true
+            this.request('connect', this.buildConnectParams()).then(() => {
+              if (!settled) {
+                settled = true
+                cleanup()
+                resolve()
+              }
+            }).catch((error) => {
+              if (!settled) {
+                settled = true
+                cleanup()
+                reject(error)
+              }
+            })
+          }
+          return
+        }
+
+        if (record.type !== 'res' || typeof record.id !== 'string') return
+        const pending = this.pending.get(record.id)
+        if (!pending) return
+        this.pending.delete(record.id)
+        if (record.ok) {
+          pending.resolve((record as { payload?: unknown }).payload)
+        } else {
+          pending.reject(new Error(record.error?.message ?? 'OpenClaw gateway request failed'))
+        }
+      })
+
+      ws.addEventListener('close', (event) => {
+        this.ws = null
+        this.connectPromise = null
+        const error = new Error(`OpenClaw gateway closed (${event.code})`)
+        failPending(error)
+        if (!settled) {
+          settled = true
+          cleanup()
+          reject(error)
+        }
+      })
+
+      ws.addEventListener('error', () => {
+        // close handler will reject
+      })
+    })
+
+    return this.connectPromise
+  }
+
+  async request<T>(method: string, params: unknown): Promise<T> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      await this.connect()
+    }
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('OpenClaw gateway is not connected')
+    }
+
+    const id = crypto.randomUUID()
+    const promise = new Promise<T>((resolve, reject) => {
+      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject })
+    })
+    this.ws.send(JSON.stringify({ type: 'req', id, method, params }))
+    return promise
+  }
+
+  async close(): Promise<void> {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.close()
+    }
+    this.ws = null
+    this.connectPromise = null
+  }
+}
+
+async function analyzeWithOpenClaw(request: OpenClawAnalysisRequest): Promise<{
+  sessionKey: string
+  runId: string
+  raw: string
+  analysis: OpenClawAnalysisPayload
+}> {
+  const settings = getOpenClawGatewaySettings()
+  if (!settings.token && !settings.password) {
+    throw new Error('OpenClaw gateway auth is not configured')
+  }
+
+  const client = new OpenClawGatewayClient(settings)
+  const sessionKey = `arcos-gateway:${request.conversationId}`
+  const message = [
+    'You are the OpenClaw gateway stage for ARCOS.',
+    'Analyze the request for orchestration only. Do not answer the user directly.',
+    'Return strict JSON with these keys only:',
+    '{',
+    '  "summary": string,',
+    '  "intent": string,',
+    '  "workflow": string,',
+    '  "recommended_tier": "ollama" | "haiku" | "arc-sonnet" | "arc-opus" | null,',
+    '  "recommended_model": string | null,',
+    '  "should_use_fabric": boolean,',
+    '  "fabric_pattern": string | null,',
+    '  "confidence": number | null,',
+    '  "reasoning": string,',
+    '  "notes": string[]',
+    '}',
+    '',
+    '## User Prompt',
+    request.prompt,
+    '',
+    '## Recent Conversation Context',
+    request.conversationSection,
+    '',
+    '## Memory Context',
+    request.memorySection,
+    '',
+    '## Plugin Context',
+    request.pluginSummary,
+  ].join('\n')
+
+  try {
+    const send = await client.request<{ runId?: string; status?: string }>('chat.send', {
+      sessionKey,
+      message,
+      deliver: false,
+      idempotencyKey: crypto.randomUUID(),
+      timeoutMs: 300000,
+    })
+
+    const runId = typeof send?.runId === 'string' ? send.runId : ''
+    if (!runId) {
+      throw new Error('OpenClaw did not return a runId for chat.send')
+    }
+
+    const wait = await client.request<{ status?: string; error?: string }>('agent.wait', {
+      runId,
+      timeoutMs: 300000,
+    })
+
+    if (wait?.status === 'error') {
+      throw new Error(wait.error ?? 'OpenClaw run failed')
+    }
+    if (wait?.status === 'timeout') {
+      throw new Error('OpenClaw run timed out')
+    }
+
+    const history = await client.request<{ messages?: unknown[] }>('chat.history', {
+      sessionKey,
+      limit: 12,
+      maxChars: 24000,
+    })
+
+    const messages = Array.isArray(history?.messages) ? history.messages : []
+    const lastAssistant = [...messages]
+      .reverse()
+      .find((entry) => (entry && typeof entry === 'object' && (entry as { role?: string }).role === 'assistant'))
+    const raw = extractOpenClawMessageText(lastAssistant)
+    const jsonText = extractJsonObject(raw)
+    if (!jsonText) {
+      throw new Error('OpenClaw returned no parseable JSON analysis')
+    }
+
+    return {
+      sessionKey,
+      runId,
+      raw,
+      analysis: JSON.parse(jsonText) as OpenClawAnalysisPayload,
+    }
+  } finally {
+    await client.close()
+  }
 }
 
 async function isHttpEndpointReachable(url: string, timeoutMs = 1200): Promise<boolean> {
@@ -1071,6 +1432,14 @@ ipcMain.handle('open-external', (_event, url: string) => { shell.openExternal(ur
 ipcMain.handle('openclaw-context', () => {
   try {
     return { success: true, ...loadOpenClawContext() }
+  } catch (e) {
+    return { success: false, error: String(e) }
+  }
+})
+ipcMain.handle('openclaw:analyze', async (_event, request: OpenClawAnalysisRequest) => {
+  try {
+    const result = await analyzeWithOpenClaw(request)
+    return { success: true, ...result }
   } catch (e) {
     return { success: false, error: String(e) }
   }

@@ -1,6 +1,6 @@
 import { loadArcPrompt } from './arcLoader'
 import { MemoryCitation, sourceLabel } from './memoryService'
-import { Plugin } from '../stores/types'
+import { ModelTier, Plugin } from '../stores/types'
 import { TraceEntry, useTraceStore } from '../stores/traceStore'
 
 export interface CanonicalChainOptions {
@@ -19,6 +19,7 @@ export interface CanonicalChainResult {
   rebuiltUserPrompt: string
   rebuiltSystemPrompt: string
   routingPrompt: string
+  openClawTierOverride?: ModelTier
 }
 
 const appendTrace = (entry: Omit<TraceEntry, 'id' | 'timestamp'>) => useTraceStore.getState().appendEntry(entry)
@@ -40,6 +41,13 @@ function buildConversationSection(history: Array<{ role: string; content: string
   return recent
     .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
     .join('\n\n')
+}
+
+function mapOpenClawTier(value?: string): ModelTier | undefined {
+  if (value === 'ollama' || value === 'haiku' || value === 'arc-sonnet' || value === 'arc-opus') {
+    return value
+  }
+  return undefined
 }
 
 export async function executeCanonicalChain(opts: CanonicalChainOptions): Promise<CanonicalChainResult> {
@@ -68,6 +76,9 @@ export async function executeCanonicalChain(opts: CanonicalChainOptions): Promis
   const { prompt: arcPrompt, source } = await loadArcPrompt()
   const memorySection = buildMemorySection(opts.memoryCitations)
   const conversationSection = buildConversationSection(opts.conversationHistory)
+  const pluginSummary = opts.plugin
+    ? `${opts.plugin.name} (${opts.plugin.architectureRole}) targeting ${opts.plugin.targetStages.join(', ')}`
+    : 'No active plugin.'
 
   appendTrace({
     source: 'memory',
@@ -100,6 +111,65 @@ export async function executeCanonicalChain(opts: CanonicalChainOptions): Promis
     ? 'No OpenClaw workspace context files were available.'
     : openClawFiles.map((file) => `# ${file.name}\n${file.content}`).join('\n\n')
 
+  let openClawAnalysisBlock = 'No live OpenClaw gateway analysis was available.'
+  let openClawTierOverride: ModelTier | undefined
+  let fabricPatternSuggestion: string | null = null
+
+  if (opts.services.openClawRunning) {
+    const analysisResult = await window.electron.openClawAnalyze({
+      conversationId: opts.conversationId,
+      prompt: opts.prompt,
+      conversationSection,
+      memorySection,
+      pluginSummary,
+    })
+
+    if (analysisResult.success && analysisResult.analysis) {
+      const analysis = analysisResult.analysis
+      openClawTierOverride = mapOpenClawTier(analysis.recommended_tier)
+      fabricPatternSuggestion = analysis.should_use_fabric ? (analysis.fabric_pattern ?? null) : null
+      openClawAnalysisBlock = [
+        `Summary: ${analysis.summary ?? 'n/a'}`,
+        `Intent: ${analysis.intent ?? 'n/a'}`,
+        `Workflow: ${analysis.workflow ?? 'n/a'}`,
+        `Recommended tier: ${analysis.recommended_tier ?? 'none'}`,
+        `Recommended model: ${analysis.recommended_model ?? 'none'}`,
+        `Fabric: ${analysis.should_use_fabric ? `yes${analysis.fabric_pattern ? ` (${analysis.fabric_pattern})` : ''}` : 'no'}`,
+        `Confidence: ${analysis.confidence ?? 'n/a'}`,
+        `Reasoning: ${analysis.reasoning ?? 'n/a'}`,
+        analysis.notes && analysis.notes.length > 0 ? `Notes: ${analysis.notes.join(' | ')}` : '',
+      ].filter(Boolean).join('\n')
+
+      appendTrace({
+        source: 'service',
+        level: 'success',
+        title: 'OpenClaw gateway analysis completed',
+        detail: [
+          analysis.summary ?? 'No summary returned.',
+          openClawTierOverride ? `Tier recommendation: ${openClawTierOverride}.` : '',
+          fabricPatternSuggestion ? `Fabric suggestion: ${fabricPatternSuggestion}.` : '',
+        ].filter(Boolean).join(' '),
+        conversationId: opts.conversationId,
+        stage: 'OpenClaw',
+        executionState: 'service_action',
+        relatedPanels: ['services', 'runtime', 'transparency', 'execution'],
+      })
+    } else {
+      appendTrace({
+        source: 'service',
+        level: 'warn',
+        title: 'OpenClaw gateway analysis failed',
+        detail: analysisResult.error ?? 'OpenClaw did not return a usable orchestration result.',
+        conversationId: opts.conversationId,
+        stage: 'OpenClaw',
+        executionState: 'degraded',
+        relatedPanels: ['services', 'runtime', 'transparency'],
+        degraded: true,
+        failureType: 'service_health',
+      })
+    }
+  }
+
   appendTrace({
     source: 'service',
     level: openClawContext.success ? 'success' : 'warn',
@@ -116,10 +186,14 @@ export async function executeCanonicalChain(opts: CanonicalChainOptions): Promis
 
   appendTrace({
     source: 'fabric',
-    level: opts.services.fabricRunning ? 'info' : 'warn',
-    title: opts.services.fabricRunning ? 'Fabric stage evaluated' : 'Fabric stage degraded',
+    level: opts.services.fabricRunning ? (fabricPatternSuggestion ? 'success' : 'info') : 'warn',
+    title: opts.services.fabricRunning
+      ? (fabricPatternSuggestion ? 'Fabric skill suggested' : 'Fabric stage evaluated')
+      : 'Fabric stage degraded',
     detail: opts.services.fabricRunning
-      ? 'Fabric is participating in the chain as a shaping checkpoint for this request. No default transformation pattern is configured yet, so this message passes through unchanged.'
+      ? (fabricPatternSuggestion
+          ? `OpenClaw suggested the Fabric pattern "${fabricPatternSuggestion}" for this request. ARCOS is recording the recommendation, but automatic Fabric execution is not wired into chat yet.`
+          : 'Fabric is participating in the chain as a shaping checkpoint for this request. No Fabric pattern was selected.')
       : 'Fabric is offline. The chain continues with a direct pass-through at the Fabric stage.',
     conversationId: opts.conversationId,
     stage: 'Fabric',
@@ -156,6 +230,9 @@ export async function executeCanonicalChain(opts: CanonicalChainOptions): Promis
     '### OpenClaw Workspace Context',
     openClawContextBlock,
     '',
+    '### OpenClaw Gateway Analysis',
+    openClawAnalysisBlock,
+    '',
     '## Execution Requirement',
     'You are responding through the ARCOS canonical execution chain. Respect the PAI context above when producing the response.',
     opts.plugin ? `## Active Plugin Override\n${opts.plugin.systemPrompt}` : '',
@@ -184,6 +261,13 @@ export async function executeCanonicalChain(opts: CanonicalChainOptions): Promis
   return {
     rebuiltUserPrompt,
     rebuiltSystemPrompt,
-    routingPrompt: `${opts.prompt}\n\n${memorySection}`,
+    routingPrompt: [
+      opts.prompt,
+      '',
+      memorySection,
+      '',
+      openClawAnalysisBlock,
+    ].join('\n'),
+    openClawTierOverride,
   }
 }

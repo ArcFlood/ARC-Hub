@@ -1214,6 +1214,32 @@
         "The template intentionally excludes the real ~/.openclaw/openclaw.json and any secrets or machine-specific credentials.",
         "The README was rewritten to reflect ARCOS as a PAI control plane with OpenClaw and Fabric as required external runtime dependencies."
       ]
+    },
+    {
+      "entry_id": "codex-2026-04-04-048",
+      "date": "2026-04-04",
+      "agent": "Codex",
+      "task_title": "Implement real OpenClaw runtime handoff in ARCOS chat chain",
+      "summary": "Replaced the placeholder OpenClaw file-load stage with a real gateway handoff. ARCOS now opens a token-authenticated WebSocket connection to the local OpenClaw gateway, submits a per-request orchestration analysis through chat.send, waits for completion, reads the resulting session analysis, and feeds that output back into prompt rebuilding, transparency, and routing-tier override logic.",
+      "files_touched": [
+        "arcos/src/main/main.ts",
+        "arcos/src/preload/preload.ts",
+        "arcos/src/renderer/electron.d.ts",
+        "arcos/src/renderer/services/canonicalChainService.ts",
+        "arcos/src/renderer/components/MessageInput.tsx",
+        "documentation/arcos_wbs.md",
+        "AI Work Logs/Codex_Log.json"
+      ],
+      "status": "completed",
+      "verification": [
+        "npm exec tsc -- --noEmit",
+        "npm run lint",
+        "npm run build:dir"
+      ],
+      "notes": [
+        "OpenClaw now materially affects the chain by returning structured orchestration output and an optional routing-tier recommendation.",
+        "Fabric is still passive in normal chat. The remaining gaps are 18.6 through 18.9: active Fabric selection, explicit path distinctions, and end-to-end validation."
+      ]
     }
   ]
 }

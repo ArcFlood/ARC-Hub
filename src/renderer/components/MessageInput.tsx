@@ -220,9 +220,11 @@ export default function MessageInput({ conversationId }: Props) {
     const { tier, reason } = routeQuery(canonicalChain.routingPrompt, settings.routingMode, settings.routingAggressiveness, ollamaRunning, spendingToday, settings.dailyBudgetLimit)
 
     // Effective tier — plugin overrides router
-    const effectiveTier = resolvedPlugin ? resolvedPlugin.tier : tier
+    const effectiveTier = resolvedPlugin ? resolvedPlugin.tier : (canonicalChain.openClawTierOverride ?? tier)
     const effectiveReason = resolvedPlugin
       ? `Plugin: ${resolvedPlugin.name} → ${TIER_DISPLAY_LABELS[resolvedPlugin.tier]}`
+      : canonicalChain.openClawTierOverride
+      ? `OpenClaw gateway → ${TIER_DISPLAY_LABELS[canonicalChain.openClawTierOverride]}`
       : reason
 
     const estimatedInputTokens = estimateTokens(

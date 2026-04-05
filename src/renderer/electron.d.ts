@@ -13,6 +13,31 @@ declare global {
         files?: Array<{ name: string; path: string; content: string }>
         error?: string
       }>
+      openClawAnalyze: (params: {
+        conversationId: string
+        prompt: string
+        conversationSection: string
+        memorySection: string
+        pluginSummary: string
+      }) => Promise<{
+        success: boolean
+        sessionKey?: string
+        runId?: string
+        raw?: string
+        analysis?: {
+          summary?: string
+          intent?: string
+          workflow?: string
+          recommended_tier?: string
+          recommended_model?: string
+          should_use_fabric?: boolean
+          fabric_pattern?: string | null
+          confidence?: number | null
+          reasoning?: string
+          notes?: string[]
+        }
+        error?: string
+      }>
 
       ollamaListModels: () => Promise<{ success: boolean; models: string[] }>
       ollamaListModelDetails: () => Promise<{ success: boolean; models: LocalModelInfo[] }>
